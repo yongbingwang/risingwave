@@ -197,13 +197,10 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
         let mut row_bytes = vec![];
 
         loop {
-            if self.next_idx >= self.buf.len() {
-                // Need to consume more from state store
-                self.consume_more().await?
-            }
             let (key, value) = match self.buf.get(self.next_idx) {
                 Some(kv) => kv,
                 None => {
+                    // Need to consume more from state store
                     self.consume_more().await?;
                     if let Some(item) = self.buf.first() {
                         item

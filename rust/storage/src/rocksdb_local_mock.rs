@@ -1,8 +1,6 @@
-<<<<<<< HEAD
 #![allow(dead_code)]
-=======
+
 use std::ops::RangeBounds;
->>>>>>> 8b3a93f6... part1 WIP
 
 use async_trait::async_trait;
 use bytes::Bytes;

@@ -50,7 +50,6 @@ use self::iterator::{
 };
 use self::key::{key_with_epoch, user_key, FullKey};
 use self::multi_builder::CapacitySplitTableBuilder;
-use self::snapshot::HummockSnapshot;
 pub use self::state_store::*;
 use self::utils::bloom_filter_sstables;
 use self::version_manager::VersionManager;
@@ -194,14 +193,6 @@ impl HummockStorage {
             hummock_meta_client,
         };
         Ok(instance)
-    }
-
-    async fn get_snapshot(&self) -> HummockResult<HummockSnapshot> {
-        let timer = self.get_stats_ref().get_snapshot_latency.start_timer();
-        let epoch = self.hummock_meta_client().pin_snapshot().await?;
-        let res = HummockSnapshot::new(epoch, self.local_version_manager.clone());
-        timer.observe_duration();
-        Ok(res)
     }
 
     pub fn get_stats_ref(&self) -> &StateStoreStats {

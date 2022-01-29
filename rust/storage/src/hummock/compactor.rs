@@ -354,10 +354,7 @@ mod tests {
 
         // Get the value after flushing to remote.
         let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&anchor)
+            .get(&anchor, epoch)
             .await
             .unwrap()
             .unwrap();
@@ -365,10 +362,7 @@ mod tests {
 
         // Test looking for a nonexistent key. `next()` would return the next key.
         let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&Bytes::from("ab"))
+            .get(&Bytes::from("ab"), epoch)
             .await
             .unwrap();
         assert_eq!(value, None);
@@ -387,10 +381,7 @@ mod tests {
         Compactor::compact(&sub_compact_context).await?;
         // Get the value after flushing to remote.
         let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&anchor)
+            .get(&anchor, epoch)
             .await
             .unwrap()
             .unwrap();
@@ -450,20 +441,14 @@ mod tests {
 
         // Get the value after flushing to remote.
         let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&anchor)
+            .get(&anchor, epoch)
             .await
             .unwrap();
         assert_eq!(value, None);
 
         // Get non-existent maximum key.
         let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&Bytes::from("ff"))
+            .get(&Bytes::from("ff"), epoch)
             .await
             .unwrap();
         assert_eq!(value, None);

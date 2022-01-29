@@ -45,10 +45,10 @@ tokio-stream = "0.1"
 tonic = "0.6"
 tracing = "0.1"
 twox-hash = "1"
+crossbeam-skiplist = { path = "../utils/crossbeam-skiplist" }
 
 [dev-dependencies]
 uuid = { version = "0.8", features = ["v4"] }
-crossbeam-skiplist = { path = "../utils/crossbeam-skiplist" }
 
 [features]
 rocksdb-local = ["rocksdb"]

@@ -143,8 +143,8 @@ impl<S: StateStore> Keyspace<S> {
         epoch: u64,
     ) -> Result<Vec<(Bytes, Bytes)>> {
         assert!(
-            start_key[..self.prefix.len()] != self.prefix,
-            "{:?} not start with prefix {:?}",
+            start_key[..self.prefix.len()] == self.prefix,
+            "{:?} does not start with prefix {:?}",
             start_key,
             self.prefix
         );

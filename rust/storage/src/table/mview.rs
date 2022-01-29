@@ -93,9 +93,10 @@ impl<S: StateStore> MViewTable<S> {
     }
 
     // TODO(MrCroxx): Refactor this after statestore iter is finished.
-    pub async fn iter(&self) -> Result<MViewTableIter<S>> {
+    // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
+    pub async fn iter(&self, epoch: u64) -> Result<MViewTableIter<'_, S>> {
         Ok(MViewTableIter::new(
-            self.keyspace.iter().await?,
+            self.keyspace.iter(epoch).await?,
             self.keyspace.key().to_owned(),
             self.schema.clone(),
             self.pk_columns.clone(),
@@ -103,7 +104,8 @@ impl<S: StateStore> MViewTable<S> {
     }
 
     // TODO(MrCroxx): More interfaces are needed besides cell get.
-    pub async fn get(&self, pk: Row, cell_idx: usize) -> Result<Option<Datum>> {
+    // The returned Datum is from a snapshot corresponding to the given `epoch`
+    pub async fn get(&self, pk: Row, cell_idx: usize, epoch: u64) -> Result<Option<Datum>> {
         debug_assert!(cell_idx < self.schema.len());
         // TODO(MrCroxx): More efficient encoding is needed.
 
@@ -115,6 +117,7 @@ impl<S: StateStore> MViewTable<S> {
                     &serialize_cell_idx(cell_idx as u32)?[..],
                 ]
                 .concat(),
+                epoch,
             )
             .await
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
@@ -133,8 +136,8 @@ impl<S: StateStore> MViewTable<S> {
     }
 }
 
-pub struct MViewTableIter<S: StateStore> {
-    inner: S::Iter,
+pub struct MViewTableIter<'a, S: StateStore> {
+    inner: S::Iter<'a>,
     prefix: Vec<u8>,
     schema: Schema,
     // TODO: why pk_columns is not used??
@@ -142,8 +145,8 @@ pub struct MViewTableIter<S: StateStore> {
     pk_columns: Vec<usize>,
 }
 
-impl<S: StateStore> MViewTableIter<S> {
-    fn new(inner: S::Iter, prefix: Vec<u8>, schema: Schema, pk_columns: Vec<usize>) -> Self {
+impl<'a, S: StateStore> MViewTableIter<'a, S> {
+    fn new(inner: S::Iter<'a>, prefix: Vec<u8>, schema: Schema, pk_columns: Vec<usize>) -> Self {
         Self {
             inner,
             prefix,
@@ -154,7 +157,7 @@ impl<S: StateStore> MViewTableIter<S> {
 }
 
 #[async_trait::async_trait]
-impl<S: StateStore> TableIter for MViewTableIter<S> {
+impl<S: StateStore> TableIter for MViewTableIter<'_, S> {
     async fn next(&mut self) -> Result<Option<Row>> {
         let mut pk_buf = vec![];
         let mut restored = 0;
@@ -211,7 +214,9 @@ where
     S: StateStore,
 {
     async fn iter(&self) -> Result<TableIterRef> {
-        Ok(Box::new(self.iter().await?))
+        // TODO: Use the correct epoch to generate iterator from a snapshot
+        let epoch = u64::MAX;
+        Ok(Box::new(self.iter(epoch).await?))
     }
 
     fn into_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Sync + Send> {

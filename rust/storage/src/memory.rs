@@ -101,9 +101,9 @@ impl MemoryStateStore {
 
 #[async_trait]
 impl StateStore for MemoryStateStore {
-    type Iter = MemoryStateStoreIter;
+    type Iter<'a> = MemoryStateStoreIter;
 
-    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         self.get_stats_ref().get_counts.inc();
         let timer = self.get_stats_ref().get_latency.start_timer();
         let inner = self.inner.lock().await;
@@ -120,7 +120,12 @@ impl StateStore for MemoryStateStore {
         Ok(res)
     }
 
-    async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
+    async fn scan(
+        &self,
+        prefix: &[u8],
+        limit: Option<usize>,
+        _epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
         self.scan_inner(prefix, limit).await
     }
 
@@ -128,6 +133,7 @@ impl StateStore for MemoryStateStore {
         &self,
         prefix: &[u8],
         limit: Option<usize>,
+        _epoch: u64,
     ) -> Result<Vec<(Bytes, Bytes)>> {
         self.reverse_scan_inner(prefix, limit).await
     }
@@ -137,7 +143,7 @@ impl StateStore for MemoryStateStore {
         self.ingest_batch_inner(kv_pairs).await
     }
 
-    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
+    async fn iter(&'_ self, prefix: &[u8], _epoch: u64) -> Result<Self::Iter<'_>> {
         #[allow(clippy::mutable_key_type)]
         let snapshot: BTreeMap<_, _> = self
             .inner

@@ -108,8 +108,9 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Treat the keyspace as a single key, and get its value.
-    pub async fn value(&self) -> Result<Option<Bytes>> {
-        self.store.get(&self.prefix).await
+    /// The returned value is based on a snapshot corresponding to the given `epoch`
+    pub async fn value(&self, epoch: u64) -> Result<Option<Bytes>> {
+        self.store.get(&self.prefix, epoch).await
     }
 
     /// Concatenate this keyspace and the given key to produce a prefixed key.
@@ -124,15 +125,21 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Scan `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
     /// the given prefix will be scanned.
-    pub async fn scan(&self, limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        self.store.scan(&self.prefix, limit).await
+    /// The returned values are based on a snapshot corresponding to the given `epoch`
+    pub async fn scan(&self, limit: Option<usize>, epoch: u64) -> Result<Vec<(Bytes, Bytes)>> {
+        self.store.scan(&self.prefix, limit, epoch).await
     }
 
     /// Scan from the keyspace, and then strip the prefix of this keyspace.
+    /// The returned values are based on a snapshot corresponding to the given `epoch`
     ///
     /// See also: [`Keyspace::scan`]
-    pub async fn scan_strip_prefix(&self, limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        let mut pairs = self.scan(limit).await?;
+    pub async fn scan_strip_prefix(
+        &self,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        let mut pairs = self.scan(limit, epoch).await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
@@ -140,8 +147,9 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Get an iterator with the prefix of this keyspace.
-    pub async fn iter(&self) -> Result<S::Iter> {
-        self.store.iter(self.key()).await
+    /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
+    pub async fn iter(&'_ self, epoch: u64) -> Result<S::Iter<'_>> {
+        self.store.iter(self.key(), epoch).await
     }
 
     /// Get the underlying state store.

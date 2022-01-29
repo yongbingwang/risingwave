@@ -25,10 +25,10 @@ impl HummockStateStore {
 // Note(eric): How about removing HummockStateStore and just impl StateStore for HummockStorage?
 #[async_trait]
 impl StateStore for HummockStateStore {
-    type Iter = HummockStateStoreIter;
+    type Iter<'a> = HummockStateStoreIter<'a>;
 
-    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        let value = self.storage.get(key).await?;
+    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<Bytes>> {
+        let value = self.storage.get(key, epoch).await?;
         let value = value.map(Bytes::from);
         Ok(value)
     }
@@ -46,10 +46,10 @@ impl StateStore for HummockStateStore {
         Ok(())
     }
 
-    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
+    async fn iter(&'_ self, prefix: &[u8], epoch: u64) -> Result<Self::Iter<'_>> {
         let timer = self.storage.get_stats_ref().iter_seek_latency.start_timer();
         let range = prefix.to_owned()..next_key(prefix);
-        let inner = self.storage.range_scan(range).await?;
+        let inner = self.storage.range_scan(range, epoch).await?;
         self.storage.get_stats_ref().iter_counts.inc();
         let mut res = DirectedUserIterator::Forward(inner);
         res.rewind().await?;
@@ -57,19 +57,19 @@ impl StateStore for HummockStateStore {
         Ok(HummockStateStoreIter(res))
     }
 
-    async fn reverse_iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
+    async fn reverse_iter(&'_ self, prefix: &[u8], epoch: u64) -> Result<Self::Iter<'_>> {
         let range = prefix.to_owned()..prev_key(prefix);
-        let inner = self.storage.reverse_range_scan(range).await?;
+        let inner = self.storage.reverse_range_scan(range, epoch).await?;
         let mut res = DirectedUserIterator::Backward(inner);
         res.rewind().await?;
         Ok(HummockStateStoreIter(res))
     }
 }
 
-pub struct HummockStateStoreIter(DirectedUserIterator);
+pub struct HummockStateStoreIter<'a>(DirectedUserIterator<'a>);
 
 #[async_trait]
-impl StateStoreIter for HummockStateStoreIter {
+impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
     type Item = (Bytes, Bytes);
 

@@ -138,7 +138,7 @@ impl Compactor {
     async fn sub_compact(
         context: SubCompactContext,
         kr: KeyRange,
-        mut iter: MergeIterator,
+        mut iter: MergeIterator<'_>,
         local_sorted_output_ssts: &mut Vec<SSTable>,
         is_target_ultimate_and_leveling: bool,
         watermark: Epoch,

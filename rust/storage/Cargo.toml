@@ -48,6 +48,7 @@ twox-hash = "1"
 
 [dev-dependencies]
 uuid = { version = "0.8", features = ["v4"] }
+crossbeam-skiplist = { path = "../utils/crossbeam-skiplist" }
 
 [features]
 rocksdb-local = ["rocksdb"]

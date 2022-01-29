@@ -17,9 +17,9 @@ impl RocksDBStateStore {
 
 #[async_trait]
 impl StateStore for RocksDBStateStore {
-    type Iter = RocksDBStateStoreIter;
+    type Iter<'a> = RocksDBStateStoreIter;
 
-    async fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
+    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         unimplemented!()
     }
 
@@ -31,7 +31,7 @@ impl StateStore for RocksDBStateStore {
         unimplemented!()
     }
 
-    async fn iter(&self, _prefix: &[u8]) -> Result<Self::Iter> {
+    async fn iter(&'_ self, _prefix: &[u8], _epoch: u64) -> Result<Self::Iter<'_>> {
         unimplemented!()
     }
 }
@@ -48,7 +48,7 @@ impl RocksDBStateStoreIter {
 impl StateStoreIter for RocksDBStateStoreIter {
     type Item = (Bytes, Bytes);
 
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
+    async fn next(&'_ mut self) -> Result<Option<Self::Item>> {
         unimplemented!()
     }
 }

@@ -67,8 +67,9 @@ async fn test_prometheus_endpoint_hummock() {
         .await
         .unwrap();
 
+    let epoch = u64::MAX;
     assert_eq!(
-        hummock_storage.get(&anchor).await.unwrap().unwrap(),
+        hummock_storage.get(&anchor, epoch).await.unwrap().unwrap(),
         Bytes::from("111")
     );
     let notifier = Arc::new(tokio::sync::Notify::new());
@@ -256,7 +257,7 @@ async fn test_basic() {
     assert_eq!(len, 4);
 }
 
-async fn count_iter(iter: &mut UserIterator) -> usize {
+async fn count_iter(iter: &mut UserIterator<'_>) -> usize {
     let mut c: usize = 0;
     while iter.is_valid() {
         c += 1;

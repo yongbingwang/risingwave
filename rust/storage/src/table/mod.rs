@@ -121,4 +121,4 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
 /// Reference of a `TableManager`.
 pub type TableManagerRef = Arc<dyn TableManager>;
 pub type ScannableTableRef = Arc<dyn ScannableTable>;
-pub type TableIterRef = Box<dyn TableIter>;
+pub type TableIterRef<'a> = Box<dyn TableIter + 'a>;

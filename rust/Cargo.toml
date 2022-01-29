@@ -18,6 +18,8 @@ members = [
   "tests/regress",
   "utils/memcomparable",
   "utils/pgwire",
+  "utils/skiplist",
+  "utils/crossbeam-skiplist",
 ]
 
 [profile.release]

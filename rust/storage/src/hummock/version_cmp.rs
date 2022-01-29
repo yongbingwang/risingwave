@@ -3,6 +3,7 @@ use std::cmp;
 use super::key::{split_key_epoch, user_key};
 
 /// Compare two full keys first by their user keys, then by their versions (epochs).
+#[derive(Default, Debug, Clone, Copy)]
 pub struct VersionedComparator;
 
 impl VersionedComparator {

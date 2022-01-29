@@ -15,13 +15,18 @@ impl TikvStateStore {
 }
 #[async_trait]
 impl StateStore for TikvStateStore {
-    type Iter = TikvStateStoreIter;
+    type Iter<'a> = TikvStateStoreIter;
 
-    async fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
+    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         unimplemented!()
     }
 
-    async fn scan(&self, _prefix: &[u8], _limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
+    async fn scan(
+        &self,
+        _prefix: &[u8],
+        _limit: Option<usize>,
+        _epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
         unimplemented!()
     }
 
@@ -33,7 +38,7 @@ impl StateStore for TikvStateStore {
         unimplemented!()
     }
 
-    async fn iter(&self, _prefix: &[u8]) -> Result<Self::Iter> {
+    async fn iter(&'_ self, _prefix: &[u8], _epoch: u64) -> Result<Self::Iter<'_>> {
         unimplemented!()
     }
 }
@@ -48,7 +53,7 @@ impl TikvStateStoreIter {
 
 #[async_trait]
 impl StateStoreIter for TikvStateStoreIter {
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
+    async fn next(&'_ mut self) -> Result<Option<Self::Item>> {
         unimplemented!()
     }
 

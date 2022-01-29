@@ -66,9 +66,7 @@ pub struct SkiplistMemTableIterator<'a> {
     range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     inner:
         map::Range<'a, Vec<u8>, (Bound<Vec<u8>>, Bound<Vec<u8>>), Vec<u8>, HummockValue<Vec<u8>>>,
-    // TODO: Store slice after changeing key(), value() in HummockIterator to take a lifetime
-    // argument
-    current: Option<(Vec<u8>, HummockValue<Vec<u8>>)>,
+    current:  Option<map::Entry<'a, Vec<u8>, HummockValue<Vec<u8>>>>
 }
 
 impl<'a> SkiplistMemTableIterator<'a> {
@@ -95,17 +93,17 @@ impl<'a> SkiplistMemTableIterator<'a> {
 #[async_trait]
 impl<'a> HummockIterator for SkiplistMemTableIterator<'a> {
     async fn next(&mut self) -> HummockResult<()> {
-        let entry = self.inner.next().unwrap();
-        self.current = Some((entry.key().clone(), entry.value().clone()));
+        self.current = self.inner.next();
         Ok(())
     }
 
     fn key(&self) -> &[u8] {
-        self.current.unwrap().0.as_slice()
+        // self.current.as_ref().unwrap().0.as_slice()
+        self.current.as_ref().unwrap().key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        match self.current.unwrap().1 {
+        match self.current.as_ref().unwrap().value() {
             HummockValue::Put(v) => HummockValue::Put(v.as_slice()),
             HummockValue::Delete => HummockValue::Delete,
         }
@@ -119,18 +117,20 @@ impl<'a> HummockIterator for SkiplistMemTableIterator<'a> {
         self.rewind_inner()
     }
 
-    async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
+    async fn seek(&mut self, _key: &[u8]) -> HummockResult<()> {
         todo!()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
 
-    use super::SkiplistMemTable;
     use crate::hummock::memtable::MemTable;
+    use super::SkiplistMemTable;
     use crate::hummock::value::HummockValue;
 
     fn generate_random_bytes(len: usize) -> Vec<u8> {
@@ -140,7 +140,7 @@ mod tests {
     #[tokio::test]
     async fn test_memtable() {
         // Generate random kv pairs with duplicate keys
-        let memtable = SkiplistMemTable::new(10240);
+        let memtable = Arc::new(SkiplistMemTable::new());
         let mut kv_pairs: Vec<(Vec<u8>, Vec<HummockValue<Vec<u8>>>)> = vec![];
         let mut rng = thread_rng();
         for _ in 0..1000 {
@@ -175,7 +175,9 @@ mod tests {
         for (key, vals) in kv_pairs.clone() {
             let memtable = memtable.clone();
             tokio::spawn(async move {
-                let latest_value = memtable.get(key.as_slice()).unwrap().unwrap();
+                let latest_value = memtable.get(key.as_slice()).unwrap();
+                assert_eq!(latest_value, vals.last().unwrap().clone().into_put_value());
+                
             });
         }
     }

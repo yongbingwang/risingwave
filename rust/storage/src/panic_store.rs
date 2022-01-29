@@ -1,3 +1,5 @@
+use std::ops::RangeBounds;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
@@ -25,7 +27,10 @@ impl StateStore for PanicStateStore {
         panic!("should not write the panic state store!");
     }
 
-    async fn iter(&'_ self, _prefix: &[u8], _epoch: u64) -> Result<Self::Iter<'_>> {
+    async fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> {
         panic!("should not create iter from the panic state store!");
     }
 }

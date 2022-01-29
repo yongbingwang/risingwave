@@ -1,10 +1,11 @@
+use std::ops::RangeBounds;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
 use super::HummockStorage;
 use crate::hummock::iterator::DirectedUserIterator;
-use crate::hummock::key::{next_key, prev_key};
 use crate::{StateStore, StateStoreIter};
 
 /// A wrapper over [`HummockStorage`] as a state store.
@@ -46,10 +47,13 @@ impl StateStore for HummockStateStore {
         Ok(())
     }
 
-    async fn iter(&'_ self, prefix: &[u8], epoch: u64) -> Result<Self::Iter<'_>> {
+    async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> 
+    {
         let timer = self.storage.get_stats_ref().iter_seek_latency.start_timer();
-        let range = prefix.to_owned()..next_key(prefix);
-        let inner = self.storage.range_scan(range, epoch).await?;
+        let inner = self.storage.range_scan(key_range, epoch).await?;
         self.storage.get_stats_ref().iter_counts.inc();
         let mut res = DirectedUserIterator::Forward(inner);
         res.rewind().await?;
@@ -57,12 +61,13 @@ impl StateStore for HummockStateStore {
         Ok(HummockStateStoreIter(res))
     }
 
-    async fn reverse_iter(&'_ self, prefix: &[u8], epoch: u64) -> Result<Self::Iter<'_>> {
-        let range = prefix.to_owned()..prev_key(prefix);
-        let inner = self.storage.reverse_range_scan(range, epoch).await?;
-        let mut res = DirectedUserIterator::Backward(inner);
+    async fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> {        
+        let mut res = self.storage.reverse_range_scan(key_range, epoch).await?;
         res.rewind().await?;
-        Ok(HummockStateStoreIter(res))
+        Ok(HummockStateStoreIter(DirectedUserIterator::Backward(res)))
     }
 }
 

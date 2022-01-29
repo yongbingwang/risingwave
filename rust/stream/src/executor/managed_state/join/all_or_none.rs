@@ -124,7 +124,9 @@ impl<S: StateStore> AllOrNoneState<S> {
 
     // Fetch cache from the state store.
     async fn fetch_cache(&mut self) {
-        let all_data = self.keyspace.scan_strip_prefix(None).await.unwrap();
+        // TODO: use the correct epoch
+        let epoch = u64::MAX;
+        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await.unwrap();
 
         for (raw_key, raw_value) in all_data {
             let pk_deserializer = RowDeserializer::new(self.pk_data_types.clone());

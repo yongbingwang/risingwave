@@ -1,3 +1,4 @@
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -29,22 +30,30 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     ///
     /// TODO: in some cases, the scan can be optimized into a `multi_get` request.
-    async fn scan(
+    async fn scan<R, B>(
         &self,
-        prefix: &[u8],
+        key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>> {
-        collect_from_iter(self.iter(prefix, epoch).await?, limit).await
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        collect_from_iter(self.iter(key_range, epoch).await?, limit).await
     }
 
-    async fn reverse_scan(
+    async fn reverse_scan<R, B>(
         &self,
-        prefix: &[u8],
+        key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>> {
-        collect_from_iter(self.reverse_iter(prefix, epoch).await?, limit).await
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        collect_from_iter(self.reverse_iter(key_range, epoch).await?, limit).await
     }
 
     /// Ingest a batch of data into the state store. One write batch should never contain operation
@@ -61,12 +70,19 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Open and return an iterator for given `prefix`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`.
-    async fn iter(&'_ self, prefix: &[u8], epoch: u64) -> Result<Self::Iter<'_>>;
+    async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>;
 
     /// Open and return a reversed iterator for given `prefix`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`
-    async fn reverse_iter(&'_ self, _prefix: &[u8], epoch: u64) -> Result<Self::Iter<'_>> {
+    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         unimplemented!()
     }
 

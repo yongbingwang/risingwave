@@ -1,3 +1,5 @@
+use std::ops::RangeBounds;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
@@ -21,12 +23,16 @@ impl StateStore for TikvStateStore {
         unimplemented!()
     }
 
-    async fn scan(
+    async fn scan<R, B>(
         &self,
-        _prefix: &[u8],
+        _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>> {
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         unimplemented!()
     }
 
@@ -38,7 +44,10 @@ impl StateStore for TikvStateStore {
         unimplemented!()
     }
 
-    async fn iter(&'_ self, _prefix: &[u8], _epoch: u64) -> Result<Self::Iter<'_>> {
+    async fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> {
         unimplemented!()
     }
 }

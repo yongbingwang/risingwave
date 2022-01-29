@@ -1,6 +1,6 @@
 //! Hummock is the state store of the streaming system.
 
-use std::ops::Bound::{Excluded, Included};
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 

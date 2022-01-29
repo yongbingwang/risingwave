@@ -162,7 +162,7 @@ async fn test_basic() {
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     // epoch 0 is reserved by storage service
-    let mut epoch: u64 = 1;
+    let epoch1: u64 = 1;
 
     // Write first batch.
     hummock_storage
@@ -170,88 +170,79 @@ async fn test_basic() {
             batch1
                 .into_iter()
                 .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch,
+                epoch1,
         )
         .await
         .unwrap();
 
-    let snapshot1 = hummock_storage.get_snapshot().await.unwrap();
 
     // Get the value after flushing to remote.
-    let value = snapshot1.get(&anchor).await.unwrap().unwrap();
+    let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111"));
 
     // Test looking for a nonexistent key. `next()` would return the next key.
-    let value = snapshot1.get(&Bytes::from("ab")).await.unwrap();
+    let value = hummock_storage.get(&Bytes::from("ab"), epoch1).await.unwrap();
     assert_eq!(value, None);
 
     // Write second batch.
-    epoch += 1;
+    let epoch2 = epoch1 + 1;
     hummock_storage
         .write_batch(
             batch2
                 .into_iter()
                 .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch,
+                epoch2,
         )
         .await
         .unwrap();
 
-    let snapshot2 = hummock_storage.get_snapshot().await.unwrap();
 
     // Get the value after flushing to remote.
-    let value = snapshot2.get(&anchor).await.unwrap().unwrap();
+    let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111111"));
 
     // Write third batch.
-    epoch += 1;
+    let epoch3 = epoch2 + 1;
     hummock_storage
         .write_batch(
             batch3
                 .into_iter()
                 .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch,
+                epoch3,
         )
         .await
         .unwrap();
 
-    let snapshot3 = hummock_storage.get_snapshot().await.unwrap();
 
     // Get the value after flushing to remote.
-    let value = snapshot3.get(&anchor).await.unwrap();
+    let value = hummock_storage.get(&anchor, epoch3).await.unwrap();
     assert_eq!(value, None);
 
     // Get non-existent maximum key.
-    let value = snapshot3.get(&Bytes::from("ff")).await.unwrap();
+    let value = hummock_storage.get(&Bytes::from("ff"), epoch3).await.unwrap();
     assert_eq!(value, None);
 
     // write aa bb
-    let mut iter = snapshot1.range_scan(..=b"ee".to_vec()).await.unwrap();
+    let mut iter = hummock_storage.range_scan(..=b"ee".to_vec(), epoch3).await.unwrap();
     iter.rewind().await.unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 2);
 
     // Get the anchor value at the first snapshot
-    let value = snapshot1.get(&anchor).await.unwrap().unwrap();
+    let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111"));
 
-    // drop snapshot 1
-    drop(snapshot1);
-
     // Get the anchor value at the second snapshot
-    let value = snapshot2.get(&anchor).await.unwrap().unwrap();
+    let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111111"));
     // update aa, write cc
-    let mut iter = snapshot2.range_scan(..=b"ee".to_vec()).await.unwrap();
+    let mut iter = hummock_storage.range_scan(..=b"ee".to_vec(), epoch2).await.unwrap();
     iter.rewind().await.unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 3);
 
-    // drop snapshot 2
-    drop(snapshot2);
-
     // delete aa, write dd,ee
-    let mut iter = snapshot3.range_scan(..=b"ee".to_vec()).await.unwrap();
+    let mut iter = hummock_storage.range_scan(..=b"ee".to_vec(), epoch3).await.unwrap();
     iter.rewind().await.unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
@@ -309,7 +300,7 @@ async fn test_reload_storage() {
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     // epoch 0 is reserved by storage service
-    let mut epoch: u64 = 1;
+    let epoch1: u64 = 1;
 
     // Write first batch.
     hummock_storage
@@ -317,12 +308,10 @@ async fn test_reload_storage() {
             batch1
                 .into_iter()
                 .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch,
+                epoch1,
         )
         .await
         .unwrap();
-
-    let snapshot1 = hummock_storage.get_snapshot().await.unwrap();
 
     // Mock somthing happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
@@ -337,53 +326,45 @@ async fn test_reload_storage() {
     .unwrap();
 
     // Get the value after flushing to remote.
-    let value = snapshot1.get(&anchor).await.unwrap().unwrap();
+    let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111"));
 
     // Test looking for a nonexistent key. `next()` would return the next key.
-    let value = snapshot1.get(&Bytes::from("ab")).await.unwrap();
+    let value = hummock_storage.get(&Bytes::from("ab"), epoch1).await.unwrap();
     assert_eq!(value, None);
 
     // Write second batch.
-    epoch += 1;
+    let epoch2 = epoch1 + 1;
     hummock_storage
         .write_batch(
             batch2
                 .into_iter()
                 .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch,
+            epoch2,
         )
         .await
         .unwrap();
 
-    let snapshot2 = hummock_storage.get_snapshot().await.unwrap();
-
     // Get the value after flushing to remote.
-    let value = snapshot2.get(&anchor).await.unwrap().unwrap();
+    let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111111"));
 
     // write aa bb
-    let mut iter = snapshot1.range_scan(..=b"ee".to_vec()).await.unwrap();
+    let mut iter = hummock_storage.range_scan(..=b"ee".to_vec(), epoch2).await.unwrap();
     iter.rewind().await.unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 2);
 
     // Get the anchor value at the first snapshot
-    let value = snapshot1.get(&anchor).await.unwrap().unwrap();
+    let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111"));
 
-    // drop snapshot 1
-    drop(snapshot1);
-
     // Get the anchor value at the second snapshot
-    let value = snapshot2.get(&anchor).await.unwrap().unwrap();
+    let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111111"));
     // update aa, write cc
-    let mut iter = snapshot2.range_scan(..=b"ee".to_vec()).await.unwrap();
+    let mut iter = hummock_storage.range_scan(..=b"ee".to_vec(), epoch2).await.unwrap();
     iter.rewind().await.unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 3);
-
-    // drop snapshot 2
-    drop(snapshot2);
 }

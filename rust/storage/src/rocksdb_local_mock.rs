@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #![allow(dead_code)]
+=======
+use std::ops::RangeBounds;
+>>>>>>> 8b3a93f6... part1 WIP
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -31,7 +35,11 @@ impl StateStore for RocksDBStateStore {
         unimplemented!()
     }
 
-    async fn iter(&'_ self, _prefix: &[u8], _epoch: u64) -> Result<Self::Iter<'_>> {
+    async fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         unimplemented!()
     }
 }

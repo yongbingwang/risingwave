@@ -1,5 +1,7 @@
 mod admin;
-mod enumerator;
+pub mod enumerator;
 mod source;
-mod split;
+pub mod split;
 mod topic;
+
+pub use enumerator::*;

@@ -6,6 +6,7 @@ mod stream_manager;
 
 #[cfg(test)]
 mod test_fragmenter;
+mod source;
 
 pub use fragmenter::*;
 pub use meta::*;

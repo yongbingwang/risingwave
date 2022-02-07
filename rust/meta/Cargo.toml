@@ -29,6 +29,7 @@ paste = "1"
 prost = "0.9"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_connector = { path = "../connector" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }

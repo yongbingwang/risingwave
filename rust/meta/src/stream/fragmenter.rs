@@ -180,6 +180,20 @@ impl StreamFragmenter {
             max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
         } else {
             // Fragment on the source.
+            let node = current_fragment.get_node();
+
+            let mut n = node.as_ref();
+
+            while n.input.len() > 0 {
+                n = n.input.first().unwrap();
+            }
+
+            let source_node = if let Node::SourceNode(source_node) = n.get_node()? {
+                source_node
+            } else {
+                unreachable!("123");
+            };
+
             self.worker_count
         };
 

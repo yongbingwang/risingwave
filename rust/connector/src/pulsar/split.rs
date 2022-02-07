@@ -7,6 +7,8 @@ pub enum PulsarOffset {
     None,
 }
 
+pub type PulsarSplits = Vec<PulsarSplit>;
+
 #[derive(Debug, Clone)]
 pub struct PulsarSplit {
     pub(crate) sub_topic: String,

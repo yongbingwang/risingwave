@@ -9,6 +9,8 @@ pub enum KafkaOffset {
     None,
 }
 
+pub type KafkaSplits = Vec<KafkaSplit>;
+
 #[derive(Copy, Clone)]
 pub struct KafkaSplit {
     pub(crate) partition: i32,

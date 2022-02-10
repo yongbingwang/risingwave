@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use itertools::Itertools;
+use opentelemetry::metrics::{MeterProvider, ValueRecorder};
+use opentelemetry::KeyValue;
 use risingwave_common::error::Result;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -48,6 +51,10 @@ pub struct LocalBarrierManager {
 
     /// Last epoch of barriers.
     last_epoch: Option<u64>,
+
+    /// Latency of each barrier
+    barrier_latency: ValueRecorder<u64>,
+    barrier_start_time: Instant,
 }
 
 impl Default for LocalBarrierManager {
@@ -58,11 +65,22 @@ impl Default for LocalBarrierManager {
 
 impl LocalBarrierManager {
     fn with_state(state: BarrierState) -> Self {
+        let meter = DEFAULT_COMPUTE_STATS
+            .clone()
+            .prometheus_exporter
+            .provider()
+            .unwrap()
+            .meter("compute_monitor", None);
         Self {
             senders: HashMap::new(),
             span: tracing::Span::none(),
             state,
             last_epoch: None,
+            barrier_latency: meter
+                .u64_value_recorder("barrier_survival_time")
+                .with_description("Total time that have been cost from each barrier")
+                .init(),
+            barrier_start_time: Instant::now(),
         }
     }
 
@@ -124,6 +142,7 @@ impl LocalBarrierManager {
                 assert!(!to_collect.is_empty());
 
                 let (tx, rx) = oneshot::channel();
+                self.barrier_start_time = Instant::now();
                 *state = Some(ManagedBarrierState {
                     epoch: barrier.epoch,
                     collect_notifier: tx,
@@ -186,7 +205,12 @@ impl LocalBarrierManager {
 
                 if state.remaining_actors.is_empty() {
                     let state = managed_state.take().unwrap();
+                    let barrier_end_time = Instant::now();
                     self.last_epoch = Some(state.epoch);
+                    let latency = (barrier_end_time - self.barrier_start_time).as_micros();
+                    let attributes =
+                        vec![KeyValue::new("barrier_last_epoch", state.epoch.to_string())];
+                    self.barrier_latency.record(latency as u64, &attributes);
                     // Notify about barrier finishing.
                     let tx = state.collect_notifier;
                     if tx.send(()).is_err() {

@@ -68,6 +68,8 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     ///   per-key modification history (e.g. in compaction), not across different keys.
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()>;
 
+    // async fn sync(epoch: u64) -> Result<()>;
+
     /// Open and return an iterator for given `prefix`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`.

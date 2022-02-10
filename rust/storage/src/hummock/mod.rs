@@ -18,6 +18,7 @@ pub mod key;
 pub mod key_range;
 mod level_handler;
 pub mod local_version_manager;
+mod memtable;
 pub mod mock;
 #[cfg(test)]
 mod snapshot_tests;
@@ -28,13 +29,11 @@ mod utils;
 pub mod value;
 mod version_cmp;
 pub mod version_manager;
-mod memtable;
 
 use cloud::gen_remote_sstable;
 use compactor::{Compactor, SubCompactContext};
 pub use error::*;
-use parking_lot::Mutex as PLMutex;
-use parking_lot::RwLock as PLRwLock;
+use parking_lot::{Mutex as PLMutex, RwLock as PLRwLock};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{KeyRange, LevelType, SstableInfo};
 use tokio::select;
@@ -44,13 +43,12 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::RetryIf;
 use value::*;
 
-
 use self::iterator::{
     BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
     UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
-use self::memtable::SkiplistMemTable;
+use self::memtable::{MemTable, SkiplistMemTable};
 use self::multi_builder::CapacitySplitTableBuilder;
 pub use self::state_store::*;
 use self::utils::bloom_filter_sstables;
@@ -137,9 +135,9 @@ pub struct HummockStorage {
     stats: Arc<StateStoreStats>,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    
+
     /// epoch -> memtable
-    memtables: Arc<PLRwLock<HashMap<u64, Arc<SkiplistMemTable>>>>
+    memtables: Arc<PLRwLock<HashMap<u64, Arc<SkiplistMemTable>>>>,
 }
 
 impl HummockStorage {
@@ -196,7 +194,7 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
-            memtables: Arc::new(PLRwLock::new(HashMap::new()))
+            memtables: Arc::new(PLRwLock::new(HashMap::new())),
         };
         Ok(instance)
     }
@@ -390,6 +388,19 @@ impl HummockStorage {
         ))
     }
 
+    fn get_memtable_for_write(&self, epoch: u64) -> Arc<SkiplistMemTable> {
+        self.memtables
+            .write()
+            .entry(epoch)
+            .or_insert(Arc::new(SkiplistMemTable::new()))
+            .clone()
+    }
+
+    fn get_memtable_for_read(&self, epoch: u64) -> Option<Arc<SkiplistMemTable>> {
+        let inner = self.memtables.read();
+        inner.get(&epoch).map(|m| m.clone())
+    }
+
     /// Write batch to storage. The batch should be:
     /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
     /// * Locally unique. There should not be two or more operations on the same key in one write
@@ -404,6 +415,19 @@ impl HummockStorage {
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
         epoch: u64,
     ) -> HummockResult<()> {
+        let memtable = self.get_memtable_for_write(epoch);
+        memtable.put(kv_pairs)?;
+        // TODO: do not generate epoch if `kv_pairs` is empty
+        self.sync(epoch).await
+    }
+
+    pub async fn sync(&self, epoch: u64) -> HummockResult<()> {
+        let memtable = self.get_memtable_for_read(epoch);
+        if memtable.is_none() {
+            return Ok(())
+        }
+        let memtable = memtable.unwrap();
+
         let get_id_and_builder = || async {
             let id = self.hummock_meta_client().get_new_table_id().await?;
             let timer = self.stats.batch_write_build_table_latency.start_timer();
@@ -413,9 +437,11 @@ impl HummockStorage {
         };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
-        // TODO: do not generate epoch if `kv_pairs` is empty
-        for (k, v) in kv_pairs {
-            builder.add_user_key(k, v, epoch).await?;
+        let mut iter = memtable.get_iterator((Unbounded, Unbounded))?;
+        iter.rewind().await?;
+        while iter.is_valid() {
+            builder.add_user_key(iter.key().to_vec(), iter.value().to_owned_value(), epoch).await?;
+            iter.next().await?;
         }
 
         let (total_size, tables) = {

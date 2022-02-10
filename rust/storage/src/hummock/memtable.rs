@@ -24,7 +24,7 @@ pub struct SkiplistMemTable {
 }
 
 impl SkiplistMemTable {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             skiplist: SkipMap::new(),
         }
@@ -64,8 +64,9 @@ pub struct SkiplistMemTableIterator<'a> {
     skiplist_ref: &'a SkipMap<Vec<u8>, HummockValue<Vec<u8>>>,
     range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     inner:
-        map::Range<'a, Vec<u8>, (Bound<Vec<u8>>, Bound<Vec<u8>>), Vec<u8>, HummockValue<Vec<u8>>>,
-    current:  Option<map::Entry<'a, Vec<u8>, HummockValue<Vec<u8>>>>
+        Option<map::Range<'a, Vec<u8>, (Bound<Vec<u8>>, Bound<Vec<u8>>), Vec<u8>, HummockValue<Vec<u8>>>>,
+    current:  Option<map::Entry<'a, Vec<u8>, HummockValue<Vec<u8>>>>,
+    valid: bool,
 }
 
 impl<'a> SkiplistMemTableIterator<'a> {
@@ -73,12 +74,12 @@ impl<'a> SkiplistMemTableIterator<'a> {
         skiplist_ref: &'a SkipMap<Vec<u8>, HummockValue<Vec<u8>>>,
         range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        let inner = skiplist_ref.range(range.clone());
         Self {
             skiplist_ref,
             range,
-            inner,
+            inner: None,
             current: None,
+            valid: false
         }
     }
 }
@@ -86,7 +87,10 @@ impl<'a> SkiplistMemTableIterator<'a> {
 #[async_trait]
 impl<'a> HummockIterator for SkiplistMemTableIterator<'a> {
     async fn next(&mut self) -> HummockResult<()> {
-        self.current = self.inner.next();
+        self.current = self.inner.as_mut().unwrap().next();
+        if self.current.is_none() {
+            self.valid = false;
+        }
         Ok(())
     }
 
@@ -102,13 +106,13 @@ impl<'a> HummockIterator for SkiplistMemTableIterator<'a> {
     }
 
     fn is_valid(&self) -> bool {
-        self.current.is_some()
+        self.valid
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.inner = self.skiplist_ref.range(self.range.clone());
-        self.current = None;
-        Ok(())
+        self.inner = Some(self.skiplist_ref.range(self.range.clone()));
+        self.valid = true;
+        self.next().await
     }
 
     async fn seek(&mut self, _key: &[u8]) -> HummockResult<()> {

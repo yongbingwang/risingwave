@@ -27,6 +27,7 @@ mod utils;
 pub mod value;
 mod version_cmp;
 pub mod version_manager;
+mod memtable;
 
 use cloud::gen_remote_sstable;
 use compactor::{Compactor, SubCompactContext};
@@ -132,6 +133,7 @@ pub struct HummockStorage {
     stats: Arc<StateStoreStats>,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+
 }
 
 impl HummockStorage {

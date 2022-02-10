@@ -1144,6 +1144,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-skiplist"
+version = "0.0.0"
+dependencies = [
+ "cfg-if 1.0.0",
+ "crossbeam-epoch 0.9.7",
+ "crossbeam-utils 0.8.7",
+ "rand 0.8.4",
+ "scopeguard",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4154,6 +4165,7 @@ dependencies = [
  "bytes",
  "chrono",
  "crc32fast",
+ "crossbeam-skiplist",
  "either",
  "farmhash",
  "futures 0.3.21",

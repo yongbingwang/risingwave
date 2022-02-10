@@ -7,7 +7,7 @@ use super::iterator::{BoxedHummockIterator, HummockIterator};
 use super::value::HummockValue;
 use super::HummockResult;
 
-pub trait MemTable {
+pub trait MemTable: Send + Sync {
     fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>>;
     fn get_iterator<'a>(
         &'a self,

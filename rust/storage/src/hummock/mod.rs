@@ -1,5 +1,6 @@
 //! Hummock is the state store of the streaming system.
 
+use std::collections::HashMap;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -33,6 +34,7 @@ use cloud::gen_remote_sstable;
 use compactor::{Compactor, SubCompactContext};
 pub use error::*;
 use parking_lot::Mutex as PLMutex;
+use parking_lot::RwLock as PLRwLock;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{KeyRange, LevelType, SstableInfo};
 use tokio::select;
@@ -42,11 +44,13 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::RetryIf;
 use value::*;
 
+
 use self::iterator::{
     BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
     UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
+use self::memtable::SkiplistMemTable;
 use self::multi_builder::CapacitySplitTableBuilder;
 pub use self::state_store::*;
 use self::utils::bloom_filter_sstables;
@@ -133,7 +137,9 @@ pub struct HummockStorage {
     stats: Arc<StateStoreStats>,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-
+    
+    /// epoch -> memtable
+    memtables: Arc<PLRwLock<HashMap<u64, Arc<SkiplistMemTable>>>>
 }
 
 impl HummockStorage {
@@ -190,6 +196,7 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
+            memtables: Arc::new(PLRwLock::new(HashMap::new()))
         };
         Ok(instance)
     }

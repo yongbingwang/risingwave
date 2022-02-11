@@ -9,7 +9,7 @@ use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::version_cmp::VersionedComparator;
 
-pub trait SSTableIteratorBase: HummockIterator {}
+pub trait SSTableIteratorBase: HummockIterator<'static> {}
 
 pub trait SSTableIteratorType {
     type SSTableIterator: SSTableIteratorBase;
@@ -66,7 +66,7 @@ impl SSTableIterator {
 }
 
 #[async_trait]
-impl HummockIterator for SSTableIterator {
+impl<'a> HummockIterator<'a> for SSTableIterator {
     async fn next(&mut self) -> HummockResult<()> {
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();
@@ -102,7 +102,7 @@ impl HummockIterator for SSTableIterator {
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
-    async fn rewind(&mut self) -> HummockResult<()> {
+    async fn rewind(&'a mut self) -> HummockResult<()> {
         self.seek_idx(0, None).await
     }
 

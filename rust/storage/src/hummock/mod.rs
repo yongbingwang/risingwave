@@ -221,7 +221,7 @@ impl HummockStorage {
             return Ok(Some(v));
         }
 
-        let mut table_iters: Vec<IteratorType> = Vec::new();
+        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
 
         let version = self.local_version_manager.get_scoped_local_version();
 
@@ -235,10 +235,10 @@ impl HummockStorage {
                         key,
                     )?;
                     table_iters.extend(tables.into_iter().map(|table| {
-                        IteratorType::new_sstable_iterator(Box::new(SSTableIterator::new(
+                        Box::new(SSTableIterator::new(
                             table,
                         ))
-                            as BoxedHummockIterator)
+                            as BoxedHummockIterator
                     }))
                 }
                 LevelType::Nonoverlapping => {
@@ -248,9 +248,9 @@ impl HummockStorage {
                             .await?,
                         key,
                     )?;
-                    table_iters.push(IteratorType::new_sstable_iterator(Box::new(
+                    table_iters.push(Box::new(
                         ConcatIterator::new(tables),
-                    )))
+                    ))
                 }
             }
         }
@@ -393,9 +393,7 @@ impl HummockStorage {
             });
 
         let reverse_table_iters = overlapped_tables.map(|t| {
-            IteratorType::new_sstable_iterator(
                 Box::new(ReverseSSTableIterator::new(t)) as BoxedHummockIterator
-            )
         });
         let reverse_merge_iterator = ReverseMergeIterator::new(reverse_table_iters);
 

@@ -240,7 +240,7 @@ mod tests {
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::variants::FORWARD;
-    use crate::hummock::iterator::{BoxedHummockIterator, IteratorType};
+    use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::user_key;
     use crate::hummock::sstable::{SSTable, SSTableIterator};
     use crate::hummock::value::HummockValue;
@@ -259,9 +259,9 @@ mod tests {
             })
             .unzip();
 
-        let iters: Vec<IteratorType> = iters
+        let iters: Vec<BoxedHummockIterator> = iters
             .into_iter()
-            .map(|x| IteratorType::new_sstable_iterator(Box::new(x) as BoxedHummockIterator))
+            .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
         let mi = MergeIterator::new(iters);
@@ -298,9 +298,9 @@ mod tests {
             })
             .unzip();
 
-        let iters: Vec<IteratorType> = iters
+        let iters: Vec<BoxedHummockIterator> = iters
             .into_iter()
-            .map(|x| IteratorType::new_sstable_iterator(Box::new(x) as BoxedHummockIterator))
+            .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
         let mi = MergeIterator::new(iters);
@@ -356,13 +356,9 @@ mod tests {
         ];
         let table1 = add_kv_pair(kv_pairs).await;
 
-        let iters: Vec<IteratorType> = vec![
-            IteratorType::new_sstable_iterator(Box::new(SSTableIterator::new(Arc::new(
-                table0,
-            )))),
-            IteratorType::new_sstable_iterator(Box::new(SSTableIterator::new(Arc::new(
-                table1,
-            )))),
+        let iters: Vec<BoxedHummockIterator> = vec![
+            Box::new(SSTableIterator::new(Arc::new(table0))),
+            Box::new(SSTableIterator::new(Arc::new(table1))),
         ];
         let mi = MergeIterator::new(iters);
         let mut ui = UserIterator::new(mi, (Unbounded, Unbounded));
@@ -400,9 +396,8 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<IteratorType> = vec![IteratorType::new_sstable_iterator(
-            Box::new(SSTableIterator::new(Arc::new(table))),
-        )];
+        let iters: Vec<BoxedHummockIterator> =
+            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
         let mi = MergeIterator::new(iters);
 
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
@@ -477,9 +472,8 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<IteratorType> = vec![IteratorType::new_sstable_iterator(
-            Box::new(SSTableIterator::new(Arc::new(table))),
-        )];
+        let iters: Vec<BoxedHummockIterator> =
+            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
         let mi = MergeIterator::new(iters);
 
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
@@ -555,9 +549,8 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<IteratorType> = vec![IteratorType::new_sstable_iterator(
-            Box::new(SSTableIterator::new(Arc::new(table))),
-        )];
+        let iters: Vec<BoxedHummockIterator> =
+            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
         let mi = MergeIterator::new(iters);
         let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
@@ -635,9 +628,8 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<IteratorType> = vec![IteratorType::new_sstable_iterator(
-            Box::new(SSTableIterator::new(Arc::new(table))),
-        )];
+        let iters: Vec<BoxedHummockIterator> =
+            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
         let mi = MergeIterator::new(iters);
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
 

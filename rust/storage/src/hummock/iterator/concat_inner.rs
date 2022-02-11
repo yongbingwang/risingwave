@@ -53,7 +53,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
 }
 
 #[async_trait]
-impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
+impl<TI: SSTableIteratorType> HummockIterator<'_> for ConcatIteratorInner<TI> {
     async fn next(&mut self) -> HummockResult<()> {
         let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
         sstable_iter.next().await?;

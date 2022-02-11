@@ -17,7 +17,6 @@ pub trait MemTable: Send + Sync {
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     ) -> HummockResult<()>;
     fn is_empty(&self) -> bool;
-    fn epoch(&self) -> u64;
 }
 
 
@@ -69,14 +68,12 @@ pub trait MemtableIterator: Send + Sync {
 pub struct SkiplistMemTable {
     // skiplist: SkipMap<Vec<u8>, HummockValue<Vec<u8>>>,
     skiplist: Arc<SkipMap<Vec<u8>, HummockValue<Vec<u8>>>>,
-    epoch: u64,
 }
 
 impl SkiplistMemTable {
-    pub fn new(epoch: u64) -> Self {
+    pub fn new() -> Self {
         Self {
             skiplist: Arc::new(SkipMap::new()),
-            epoch,
         }
     }
 }
@@ -105,10 +102,6 @@ impl MemTable for SkiplistMemTable {
 
     fn is_empty(&self) -> bool {
         self.skiplist.is_empty()
-    }
-
-    fn epoch(&self) -> u64 {
-        self.epoch
     }
 }
 

@@ -53,7 +53,7 @@ impl ReverseSSTableIterator {
 }
 
 #[async_trait]
-impl HummockIterator for ReverseSSTableIterator {
+impl<'a> HummockIterator<'a> for ReverseSSTableIterator {
     async fn next(&mut self) -> HummockResult<()> {
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.prev();
@@ -91,7 +91,7 @@ impl HummockIterator for ReverseSSTableIterator {
 
     /// Instead of setting idx to 0th block, a `ReverseSSTableIterator` rewinds to the last block in
     /// the table.
-    async fn rewind(&mut self) -> HummockResult<()> {
+    async fn rewind(&'a mut self) -> HummockResult<()> {
         self.seek_idx(self.table.block_count() as isize - 1, None)
             .await
     }

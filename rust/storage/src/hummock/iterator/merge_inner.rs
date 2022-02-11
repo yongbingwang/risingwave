@@ -1,7 +1,6 @@
 use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
 use std::ops::Bound;
-use std::sync::Arc;
 use std::iter::once;
 
 use async_trait::async_trait;
@@ -47,30 +46,38 @@ impl<const DIRECTION: usize> Ord for Node<'_, DIRECTION> {
 
 /// Iterates on multiple iterators, a.k.a. `MergeIterator`.
 pub struct MergeIteratorInner<'a, const DIRECTION: usize, M: MemTable> {
-    memtable_iter_builder: MemTableIteratorBuilder<M>,
+    memtable_iter_builder: Option<MemTableIteratorBuilder<M>>,
     /// Invalid or non-initialized iterators.
     unused_iters: LinkedList<BoxedHummockIterator<'a>>,
 
     /// The heap for merge sort.
     heap: BinaryHeap<Node<'a, DIRECTION>>,
-
-    range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 }
 
 impl<'a, const DIRECTION: usize, M: MemTable> MergeIteratorInner<'a, DIRECTION, M> {
     /// Caller should make sure that `iterators`'s direction is the same as `DIRECTION`.
     pub fn new(
-        memtable_iter_builder: MemTableIteratorBuilder<M>,
         iterators: impl IntoIterator<Item = BoxedHummockIterator<'a>>,
-        range: (Bound<Vec<u8>>, Bound<Vec<u8>>)
     ) -> Self {
         Self {
-            memtable_iter_builder,
+            memtable_iter_builder: None,
             unused_iters: iterators.into_iter().collect(),
             heap: BinaryHeap::new(),
-            range
         }
     }
+
+    pub fn new_with_memtable(
+        memtable_iter_builder: MemTableIteratorBuilder<M>,
+        iterators: impl IntoIterator<Item = BoxedHummockIterator<'a>>,
+    ) -> Self {
+        Self {
+            memtable_iter_builder: Some(memtable_iter_builder),
+            unused_iters: iterators.into_iter().collect(),
+            heap: BinaryHeap::new(),
+        }
+    }
+
+
 
     /// Move all iterators from the `heap` to the linked list.
     fn reset_heap(&mut self) {
@@ -93,12 +100,14 @@ impl<'a, const DIRECTION: usize, M: MemTable> MergeIteratorInner<'a, DIRECTION, 
             .map(|i| Node(IteratorType::new_sstable_iterator(i)))
             // .chain(once(Node(self.memtable_iter_builder.build())))
             .collect();
-        self.heap.push(Node(self.memtable_iter_builder.build()));
+        if let Some(builder) = self.memtable_iter_builder {
+            self.heap.push(Node(builder.build()));
+        }
     }
 }
 
 #[async_trait]
-impl<const DIRECTION: usize, M: MemTable> HummockIterator for MergeIteratorInner<'_, DIRECTION, M> {
+impl<'a, const DIRECTION: usize, M: MemTable> HummockIterator<'a> for MergeIteratorInner<'a, DIRECTION, M> {
     async fn next(&mut self) -> HummockResult<()> {
         let mut node = self.heap.peek_mut().expect("no inner iter");
 
@@ -106,7 +115,9 @@ impl<const DIRECTION: usize, M: MemTable> HummockIterator for MergeIteratorInner
         if !node.0.is_valid() {
             // put back to `unused_iters`
             let node = PeekMut::pop(node);
-            self.unused_iters.push_back(node.0);
+            if let Node(IteratorType::SSTableIterator(inner)) = node {
+                self.unused_iters.push_back(inner);                
+            }
         } else {
             // this will update the heap top
             drop(node);
@@ -127,7 +138,7 @@ impl<const DIRECTION: usize, M: MemTable> HummockIterator for MergeIteratorInner
         self.heap.peek().map_or(false, |n| n.0.is_valid())
     }
 
-    async fn rewind(&mut self) -> HummockResult<()> {
+    async fn rewind(&'a mut self) -> HummockResult<()> {
         self.reset_heap();
         futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.rewind())).await?;
         self.build_heap();

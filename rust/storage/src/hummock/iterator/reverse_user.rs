@@ -250,7 +250,7 @@ mod tests {
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::variants::BACKWARD;
-    use crate::hummock::iterator::BoxedHummockIterator;
+    use crate::hummock::iterator::{BoxedHummockIterator, HummockIteratorImpl};
     use crate::hummock::key::{prev_key, user_key};
     use crate::hummock::sstable::{SSTable, SSTableIterator};
     use crate::hummock::value::HummockValue;
@@ -274,9 +274,9 @@ mod tests {
             })
             .unzip();
 
-        let iters: Vec<BoxedHummockIterator> = iters
+        let iters: Vec<HummockIteratorImpl> = iters
             .into_iter()
-            .map(|x| Box::new(x) as BoxedHummockIterator)
+            .map(|x| HummockIteratorImpl::new_sstable_iterator(Box::new(x) as BoxedHummockIterator))
             .collect_vec();
 
         let mi = ReverseMergeIterator::new(iters);
@@ -323,9 +323,9 @@ mod tests {
             })
             .unzip();
 
-        let iters: Vec<BoxedHummockIterator> = iters
+        let iters: Vec<HummockIteratorImpl> = iters
             .into_iter()
-            .map(|x| Box::new(x) as BoxedHummockIterator)
+            .map(|x| HummockIteratorImpl::new_sstable_iterator(Box::new(x) as BoxedHummockIterator))
             .collect_vec();
 
         let mi = ReverseMergeIterator::new(iters);
@@ -381,9 +381,13 @@ mod tests {
         ];
         let table1 = add_kv_pair(kv_pairs).await;
 
-        let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(SSTableIterator::new(Arc::new(table0))),
-            Box::new(SSTableIterator::new(Arc::new(table1))),
+        let iters: Vec<HummockIteratorImpl> = vec![
+            HummockIteratorImpl::new_sstable_iterator(Box::new(SSTableIterator::new(Arc::new(
+                table0,
+            )))),
+            HummockIteratorImpl::new_sstable_iterator(Box::new(SSTableIterator::new(Arc::new(
+                table1,
+            )))),
         ];
         let mi = ReverseMergeIterator::new(iters);
         let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
@@ -423,8 +427,9 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(ReverseSSTableIterator::new(Arc::new(table)))];
+        let iters: Vec<HummockIteratorImpl> = vec![HummockIteratorImpl::new_sstable_iterator(
+            Box::new(ReverseSSTableIterator::new(Arc::new(table))),
+        )];
         let mi = ReverseMergeIterator::new(iters);
 
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
@@ -499,8 +504,9 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(ReverseSSTableIterator::new(Arc::new(table)))];
+        let iters: Vec<HummockIteratorImpl> = vec![HummockIteratorImpl::new_sstable_iterator(
+            Box::new(ReverseSSTableIterator::new(Arc::new(table))),
+        )];
         let mi = ReverseMergeIterator::new(iters);
 
         let begin_key = Excluded(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
@@ -576,8 +582,9 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(ReverseSSTableIterator::new(Arc::new(table)))];
+        let iters: Vec<HummockIteratorImpl> = vec![HummockIteratorImpl::new_sstable_iterator(
+            Box::new(ReverseSSTableIterator::new(Arc::new(table))),
+        )];
         let mi = ReverseMergeIterator::new(iters);
         let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
@@ -651,8 +658,9 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(ReverseSSTableIterator::new(Arc::new(table)))];
+        let iters: Vec<HummockIteratorImpl> = vec![HummockIteratorImpl::new_sstable_iterator(
+            Box::new(ReverseSSTableIterator::new(Arc::new(table))),
+        )];
         let mi = ReverseMergeIterator::new(iters);
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
 
@@ -750,9 +758,9 @@ mod tests {
             Unbounded => key_from_num(999999999999),
             _ => unimplemented!(),
         };
-        let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
-            Arc::new(clone_sstable(&table)),
-        ))];
+        let iters: Vec<HummockIteratorImpl> = vec![HummockIteratorImpl::new_sstable_iterator(
+            Box::new(ReverseSSTableIterator::new(Arc::new(clone_sstable(&table)))),
+        )];
         let rsi = ReverseMergeIterator::new(iters);
         let mut ruki = ReverseUserIterator::new(rsi, (start_bound, end_bound));
         let num_puts: usize = truth

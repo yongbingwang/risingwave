@@ -63,9 +63,10 @@ impl MemTable for SkiplistMemTable {
 pub struct SkiplistMemTableIterator<'a> {
     skiplist_ref: &'a SkipMap<Vec<u8>, HummockValue<Vec<u8>>>,
     range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-    inner:
-        Option<map::Range<'a, Vec<u8>, (Bound<Vec<u8>>, Bound<Vec<u8>>), Vec<u8>, HummockValue<Vec<u8>>>>,
-    current:  Option<map::Entry<'a, Vec<u8>, HummockValue<Vec<u8>>>>,
+    inner: Option<
+        map::Range<'a, Vec<u8>, (Bound<Vec<u8>>, Bound<Vec<u8>>), Vec<u8>, HummockValue<Vec<u8>>>,
+    >,
+    current: Option<map::Entry<'a, Vec<u8>, HummockValue<Vec<u8>>>>,
     valid: bool,
 }
 
@@ -79,7 +80,7 @@ impl<'a> SkiplistMemTableIterator<'a> {
             range,
             inner: None,
             current: None,
-            valid: false
+            valid: false,
         }
     }
 }
@@ -127,8 +128,8 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
 
-    use crate::hummock::memtable::MemTable;
     use super::SkiplistMemTable;
+    use crate::hummock::memtable::MemTable;
     use crate::hummock::value::HummockValue;
 
     fn generate_random_bytes(len: usize) -> Vec<u8> {

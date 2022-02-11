@@ -4,16 +4,18 @@ use std::collections::{BinaryHeap, LinkedList};
 use async_trait::async_trait;
 
 use super::variants::*;
-use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
+use super::HummockIteratorImpl;
+use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::HummockResult;
 
-pub struct Node<'a, const DIRECTION: usize>(BoxedHummockIterator<'a>);
+pub struct Node<'a, const DIRECTION: usize>(HummockIteratorImpl<'a>);
 
 impl<const DIRECTION: usize> PartialEq for Node<'_, DIRECTION> {
     fn eq(&self, other: &Self) -> bool {
-        self.0.key() == other.0.key()
+        // self.0.key_part() == other.0.key_part() && self.0.epoch_part() == other.0.epoch_part()
+        self.0.key_parts() == other.0.key_parts()
     }
 }
 impl<const DIRECTION: usize> Eq for Node<'_, DIRECTION> {}
@@ -28,8 +30,12 @@ impl<const DIRECTION: usize> Ord for Node<'_, DIRECTION> {
         // Note: to implement min-heap by using max-heap internally, the comparing
         // order should be reversed.
         match DIRECTION {
-            FORWARD => VersionedComparator::compare_key(other.0.key(), self.0.key()),
-            BACKWARD => VersionedComparator::compare_key(self.0.key(), other.0.key()),
+            FORWARD => {
+                VersionedComparator::compare_key_parts(other.0.key_parts(), self.0.key_parts())
+            }
+            BACKWARD => {
+                VersionedComparator::compare_key_parts(self.0.key_parts(), other.0.key_parts())
+            }
             _ => unreachable!(),
         }
     }
@@ -38,7 +44,7 @@ impl<const DIRECTION: usize> Ord for Node<'_, DIRECTION> {
 /// Iterates on multiple iterators, a.k.a. `MergeIterator`.
 pub struct MergeIteratorInner<'a, const DIRECTION: usize> {
     /// Invalid or non-initialized iterators.
-    unused_iters: LinkedList<BoxedHummockIterator<'a>>,
+    unused_iters: LinkedList<HummockIteratorImpl<'a>>,
 
     /// The heap for merge sort.
     heap: BinaryHeap<Node<'a, DIRECTION>>,
@@ -46,7 +52,7 @@ pub struct MergeIteratorInner<'a, const DIRECTION: usize> {
 
 impl<'a, const DIRECTION: usize> MergeIteratorInner<'a, DIRECTION> {
     /// Caller should make sure that `iterators`'s direction is the same as `DIRECTION`.
-    pub fn new(iterators: impl IntoIterator<Item = BoxedHummockIterator<'a>>) -> Self {
+    pub fn new(iterators: impl IntoIterator<Item = HummockIteratorImpl<'a>>) -> Self {
         Self {
             unused_iters: iterators.into_iter().collect(),
             heap: BinaryHeap::new(),

@@ -9,3 +9,6 @@ group_imports = "StdExternalCrate"
 reorder_imports = true
 tab_spaces = 4
 wrap_comments = true
+ignore = [
+    "utils/crossbeam-skiplist",
+]

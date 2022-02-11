@@ -14,7 +14,7 @@ mod test {
         default_builder_opt_for_test, gen_test_sstable, iterator_test_key_of, test_key,
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
+    use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator, HummockIteratorImpl};
     use crate::hummock::ReverseSSTableIterator;
 
     #[tokio::test]
@@ -34,9 +34,9 @@ mod test {
             })
             .unzip();
 
-        let iters: Vec<BoxedHummockIterator> = iters
+        let iters: Vec<HummockIteratorImpl> = iters
             .into_iter()
-            .map(|x| Box::new(x) as BoxedHummockIterator)
+            .map(|x| HummockIteratorImpl::new_sstable_iterator(Box::new(x) as BoxedHummockIterator))
             .collect_vec();
 
         let mut mi = ReverseMergeIterator::new(iters);
@@ -71,9 +71,9 @@ mod test {
                     .finish()
             })
             .unzip();
-        let iters: Vec<BoxedHummockIterator> = iters
+        let iters: Vec<HummockIteratorImpl> = iters
             .into_iter()
-            .map(|x| Box::new(x) as BoxedHummockIterator)
+            .map(|x| HummockIteratorImpl::new_sstable_iterator(Box::new(x) as BoxedHummockIterator))
             .collect_vec();
 
         let mut mi = ReverseMergeIterator::new(iters);
@@ -110,9 +110,13 @@ mod test {
     async fn test_reverse_merge_invalidate_reset() {
         let table0 = gen_test_sstable(0, default_builder_opt_for_test()).await;
         let table1 = gen_test_sstable(1, default_builder_opt_for_test()).await;
-        let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(ReverseSSTableIterator::new(Arc::new(table1))),
-            Box::new(ReverseSSTableIterator::new(Arc::new(table0))),
+        let iters: Vec<HummockIteratorImpl> = vec![
+            HummockIteratorImpl::new_sstable_iterator(Box::new(ReverseSSTableIterator::new(
+                Arc::new(table1),
+            ))),
+            HummockIteratorImpl::new_sstable_iterator(Box::new(ReverseSSTableIterator::new(
+                Arc::new(table0),
+            ))),
         ];
 
         let mut mi = ReverseMergeIterator::new(iters);

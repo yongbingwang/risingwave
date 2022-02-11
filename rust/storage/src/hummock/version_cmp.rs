@@ -10,10 +10,15 @@ impl VersionedComparator {
     /// `&[u8]` as if compare tuple mentioned before.
     #[inline]
     pub fn compare_key(lhs: &[u8], rhs: &[u8]) -> cmp::Ordering {
-        let (l_p, l_s) = split_key_epoch(lhs);
-        let (r_p, r_s) = split_key_epoch(rhs);
+        VersionedComparator::compare_key_parts(split_key_epoch(lhs), split_key_epoch(rhs))
+    }
 
-        l_p.cmp(r_p).then_with(|| l_s.cmp(r_s))
+    #[inline]
+    pub fn compare_key_parts(l_parts: (&[u8], &[u8]), r_parts: (&[u8], &[u8])) -> cmp::Ordering {
+        l_parts
+            .0
+            .cmp(r_parts.0)
+            .then_with(|| l_parts.1.cmp(r_parts.1))
     }
 
     #[inline]

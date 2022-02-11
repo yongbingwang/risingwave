@@ -1,7 +1,9 @@
+use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
-use std::ops::Bound;
 use std::iter::once;
+use std::ops::Bound;
 
 use async_trait::async_trait;
 
@@ -45,24 +47,22 @@ impl<const DIRECTION: usize> Ord for Node<'_, DIRECTION> {
 }
 
 /// Iterates on multiple iterators, a.k.a. `MergeIterator`.
-pub struct MergeIteratorInner<'a, const DIRECTION: usize, M: MemTable> {
+pub struct MergeIteratorInner<'a, const DIRECTION: usize, M: 'a + MemTable> {
     memtable_iter_builder: Option<MemTableIteratorBuilder<M>>,
     /// Invalid or non-initialized iterators.
-    unused_iters: LinkedList<BoxedHummockIterator<'a>>,
+    unused_iters: RefCell<LinkedList<BoxedHummockIterator<'a>>>,
 
     /// The heap for merge sort.
-    heap: BinaryHeap<Node<'a, DIRECTION>>,
+    heap: RefCell<BinaryHeap<Node<'a, DIRECTION>>>,
 }
 
-impl<'a, const DIRECTION: usize, M: MemTable> MergeIteratorInner<'a, DIRECTION, M> {
+impl<'a, const DIRECTION: usize, M: 'a + MemTable> MergeIteratorInner<'a, DIRECTION, M> {
     /// Caller should make sure that `iterators`'s direction is the same as `DIRECTION`.
-    pub fn new(
-        iterators: impl IntoIterator<Item = BoxedHummockIterator<'a>>,
-    ) -> Self {
+    pub fn new(iterators: impl IntoIterator<Item = BoxedHummockIterator<'a>>) -> Self {
         Self {
             memtable_iter_builder: None,
-            unused_iters: iterators.into_iter().collect(),
-            heap: BinaryHeap::new(),
+            unused_iters: RefCell::new(iterators.into_iter().collect()),
+            heap: RefCell::new(BinaryHeap::new()),
         }
     }
 
@@ -72,51 +72,51 @@ impl<'a, const DIRECTION: usize, M: MemTable> MergeIteratorInner<'a, DIRECTION, 
     ) -> Self {
         Self {
             memtable_iter_builder: Some(memtable_iter_builder),
-            unused_iters: iterators.into_iter().collect(),
-            heap: BinaryHeap::new(),
+            unused_iters: RefCell::new(iterators.into_iter().collect()),
+            heap: RefCell::new(BinaryHeap::new()),
         }
     }
 
-
-
     /// Move all iterators from the `heap` to the linked list.
-    fn reset_heap(&mut self) {
-        self.unused_iters.extend(
+    fn reset_heap(&self) {
+        self.unused_iters.borrow_mut().extend(
             self.heap
-                .drain()
+                .borrow_mut().drain()
                 .filter(|i| i.0.is_sstable_iterator())
-                .map(|n| n.0.to_hummock_iterator()),
+                .map(|n| n.0.into_hummock_iterator()),
         );
     }
 
     /// After some of the iterators in `unused_iterators` are seeked or rewound, call this function
     /// to construct a new heap using the valid ones.
-    fn build_heap(&'a mut self) {
-        assert!(self.heap.is_empty());
+    fn build_heap(&'a self) {
+        assert!(self.heap.borrow().is_empty());
 
-        self.heap = self
-            .unused_iters
+        self.heap = RefCell::new(self
+            .unused_iters.borrow_mut()
             .drain_filter(|i| i.is_valid())
             .map(|i| Node(IteratorType::new_sstable_iterator(i)))
             // .chain(once(Node(self.memtable_iter_builder.build())))
-            .collect();
-        if let Some(builder) = self.memtable_iter_builder {
-            self.heap.push(Node(builder.build()));
-        }
+            .collect());
+        // self.heap.push(Node(self.memtable_iter_builder.unwrap().build()));
+        self.memtable_iter_builder
+            .as_ref()
+            .map_or((), |b| self.heap.borrow_mut().push(Node(b.build())));
+        // if let Some(builder) = &self.memtable_iter_builder {
+        //     self.heap.push(Node(builder.build()));
+        // }
     }
-}
 
-#[async_trait]
-impl<'a, const DIRECTION: usize, M: MemTable> HummockIterator<'a> for MergeIteratorInner<'a, DIRECTION, M> {
-    async fn next(&mut self) -> HummockResult<()> {
-        let mut node = self.heap.peek_mut().expect("no inner iter");
+    pub async fn next(&mut self) -> HummockResult<()> {
+        let mut heap = self.heap.borrow_mut();
+        let mut node = heap.peek_mut().expect("no inner iter");
 
         node.0.next().await?;
         if !node.0.is_valid() {
             // put back to `unused_iters`
             let node = PeekMut::pop(node);
             if let Node(IteratorType::SSTableIterator(inner)) = node {
-                self.unused_iters.push_back(inner);                
+                self.unused_iters.borrow_mut().push_back(inner);
             }
         } else {
             // this will update the heap top
@@ -126,29 +126,79 @@ impl<'a, const DIRECTION: usize, M: MemTable> HummockIterator<'a> for MergeItera
         Ok(())
     }
 
-    fn key(&self) -> &[u8] {
-        self.heap.peek().expect("no inner iter").0.key()
+    pub fn key(&self) -> &[u8] {
+        self.heap.borrow().peek().expect("no inner iter").0.key()
     }
 
-    fn value(&self) -> HummockValue<&[u8]> {
-        self.heap.peek().expect("no inner iter").0.value()
+    pub fn value(&self) -> HummockValue<&[u8]> {
+        self.heap.borrow().peek().expect("no inner iter").0.value()
     }
 
-    fn is_valid(&self) -> bool {
-        self.heap.peek().map_or(false, |n| n.0.is_valid())
+    pub fn is_valid(&self) -> bool {
+        self.heap.borrow().peek().map_or(false, |n| n.0.is_valid())
     }
 
-    async fn rewind(&'a mut self) -> HummockResult<()> {
+    pub async fn rewind(&'a mut self) -> HummockResult<()> {
         self.reset_heap();
-        futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.rewind())).await?;
+        let mut iters = self.unused_iters.borrow_mut();
+        futures::future::try_join_all(iters.iter_mut().map(|x| x.rewind())).await?;
         self.build_heap();
         Ok(())
     }
 
-    async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
+    pub async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         self.reset_heap();
         futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.seek(key))).await?;
         self.build_heap();
         Ok(())
     }
 }
+
+// #[async_trait]
+// impl<'a, const DIRECTION: usize, M: 'a + MemTable> HummockIterator
+//     for MergeIteratorInner<'a, DIRECTION, M>
+// {
+//     async fn next(&mut self) -> HummockResult<()> {
+//         let mut node = self.heap.peek_mut().expect("no inner iter");
+
+//         node.0.next().await?;
+//         if !node.0.is_valid() {
+//             // put back to `unused_iters`
+//             let node = PeekMut::pop(node);
+//             if let Node(IteratorType::SSTableIterator(inner)) = node {
+//                 self.unused_iters.push_back(inner);
+//             }
+//         } else {
+//             // this will update the heap top
+//             drop(node);
+//         }
+
+//         Ok(())
+//     }
+
+//     fn key(&self) -> &[u8] {
+//         self.heap.peek().expect("no inner iter").0.key()
+//     }
+
+//     fn value(&self) -> HummockValue<&[u8]> {
+//         self.heap.peek().expect("no inner iter").0.value()
+//     }
+
+//     fn is_valid(&self) -> bool {
+//         self.heap.peek().map_or(false, |n| n.0.is_valid())
+//     }
+
+//     async fn rewind(&mut self) -> HummockResult<()> {
+//         self.reset_heap();
+//         futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.rewind())).await?;
+//         self.build_heap();
+//         Ok(())
+//     }
+
+//     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
+//         self.reset_heap();
+//         futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.seek(key))).await?;
+//         self.build_heap();
+//         Ok(())
+//     }
+// }

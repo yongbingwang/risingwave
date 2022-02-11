@@ -31,7 +31,7 @@ use async_trait::async_trait;
 ///
 /// Before calling
 #[async_trait]
-pub trait HummockIterator<'a>: Send + Sync {
+pub trait HummockIterator: Send + Sync {
     /// Move a valid iterator to the next key.
     ///
     /// Note:
@@ -81,7 +81,7 @@ pub trait HummockIterator<'a>: Send + Sync {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    async fn rewind(&'a mut self) -> HummockResult<()>;
+    async fn rewind(&mut self) -> HummockResult<()>;
 
     /// Reset iterator and seek to the first position where the key >= provided key, or key <=
     /// provided key if this is a reverse iterator.
@@ -93,7 +93,7 @@ pub trait HummockIterator<'a>: Send + Sync {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()>;
 }
 
-pub type BoxedHummockIterator<'a> = Box<dyn HummockIterator<'a>>;
+pub type BoxedHummockIterator<'a> = Box<dyn HummockIterator + 'a>;
 
 pub enum IteratorType<'a> {
     SSTableIterator(BoxedHummockIterator<'a>),
@@ -120,9 +120,9 @@ impl<'a> IteratorType<'a> {
         }
     }
 
-    pub fn to_hummock_iterator(&'a self) -> BoxedHummockIterator<'a> {
+    pub fn into_hummock_iterator(self) -> BoxedHummockIterator<'a> {
         match self {
-            IteratorType::SSTableIterator(i) => *i,
+            IteratorType::SSTableIterator(i) => i,
             IteratorType::MemtableIterator { .. } => panic!(),
         }
     }

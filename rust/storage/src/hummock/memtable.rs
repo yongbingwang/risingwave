@@ -121,10 +121,12 @@ impl<'a> SkiplistMemTableIterator<'a> {
             HummockValue<Vec<u8>>,
         >,
     ) -> Self {
-        Self {
+        let mut res = Self {
             inner,
-            current: inner.next(),
-        }
+            current: None,
+        };
+        res.next();
+        res
     }
 }
 

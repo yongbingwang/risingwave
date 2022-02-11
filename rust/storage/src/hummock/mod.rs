@@ -48,7 +48,7 @@ use self::iterator::{
     ReverseMergeIterator, UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
-use self::memtable::{MemTable, SkiplistMemTable};
+use self::memtable::{MemTable, MemTableIteratorBuilder, SkiplistMemTable};
 use self::multi_builder::CapacitySplitTableBuilder;
 pub use self::state_store::*;
 use self::utils::bloom_filter_sstables;
@@ -234,12 +234,11 @@ impl HummockStorage {
                             .await?,
                         key,
                     )?;
-                    table_iters.extend(tables.into_iter().map(|table| {
-                        Box::new(SSTableIterator::new(
-                            table,
-                        ))
-                            as BoxedHummockIterator
-                    }))
+                    table_iters.extend(
+                        tables.into_iter().map(|table| {
+                            Box::new(SSTableIterator::new(table)) as BoxedHummockIterator
+                        }),
+                    )
                 }
                 LevelType::Nonoverlapping => {
                     let tables = bloom_filter_sstables(
@@ -248,9 +247,7 @@ impl HummockStorage {
                             .await?,
                         key,
                     )?;
-                    table_iters.push(Box::new(
-                        ConcatIterator::new(tables),
-                    ))
+                    table_iters.push(Box::new(ConcatIterator::new(tables)))
                 }
             }
         }
@@ -330,23 +327,15 @@ impl HummockStorage {
             key_range.end_bound().map(|b| b.as_ref().to_owned()),
         );
         let memtable = self.get_memtable(epoch);
-        let memtable_iter = memtable.get_iterator(key_range.clone())?;
-        let mut table_iters = overlapped_tables.map(|t| {
-            IteratorType::new_sstable_iterator(
-                Box::new(SSTableIterator::new(t)) as BoxedHummockIterator
-            )
-        }).collect_vec();
-        
-        table_iters.push(IteratorType::new_memtable_iterator(memtable_iter, epoch));
+        let memtable_iter_builder = MemTableIteratorBuilder::new(memtable, epoch, key_range.clone());
+        let table_iters = overlapped_tables
+            .map(|t| Box::new(SSTableIterator::new(t)) as BoxedHummockIterator);
 
-        let mi = MergeIterator::new(table_iters);
+
+        let mi = MergeIterator::new_with_memtable(memtable_iter_builder, table_iters);
 
         // TODO: avoid this clone
-        Ok(UserIterator::new_with_epoch(
-            mi,
-            key_range,
-            epoch,
-        ))
+        Ok(UserIterator::new_with_epoch(mi, key_range, epoch))
     }
 
     /// Return a reversed iterator that scans from the end key to the begin key
@@ -392,9 +381,8 @@ impl HummockStorage {
                 !too_left && !too_right
             });
 
-        let reverse_table_iters = overlapped_tables.map(|t| {
-                Box::new(ReverseSSTableIterator::new(t)) as BoxedHummockIterator
-        });
+        let reverse_table_iters = overlapped_tables
+            .map(|t| Box::new(ReverseSSTableIterator::new(t)) as BoxedHummockIterator);
         let reverse_merge_iterator = ReverseMergeIterator::new(reverse_table_iters);
 
         // TODO: avoid this clone
@@ -456,13 +444,12 @@ impl HummockStorage {
         };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
-        let mut iter = memtable.get_iterator((Unbounded, Unbounded))?;
-        iter.rewind().await?;
+        let mut iter = memtable.get_iterator((Unbounded, Unbounded));
         while iter.is_valid() {
             builder
                 .add_user_key(iter.key().to_vec(), iter.value().to_owned_value(), epoch)
                 .await?;
-            iter.next().await?;
+            iter.next();
         }
 
         let (total_size, tables) = {

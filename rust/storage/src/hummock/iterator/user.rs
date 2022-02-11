@@ -240,7 +240,7 @@ mod tests {
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::variants::FORWARD;
-    use crate::hummock::iterator::{BoxedHummockIterator, HummockIteratorImpl};
+    use crate::hummock::iterator::{BoxedHummockIterator, IteratorType};
     use crate::hummock::key::user_key;
     use crate::hummock::sstable::{SSTable, SSTableIterator};
     use crate::hummock::value::HummockValue;
@@ -259,9 +259,9 @@ mod tests {
             })
             .unzip();
 
-        let iters: Vec<HummockIteratorImpl> = iters
+        let iters: Vec<IteratorType> = iters
             .into_iter()
-            .map(|x| HummockIteratorImpl::new_sstable_iterator(Box::new(x) as BoxedHummockIterator))
+            .map(|x| IteratorType::new_sstable_iterator(Box::new(x) as BoxedHummockIterator))
             .collect_vec();
 
         let mi = MergeIterator::new(iters);
@@ -298,9 +298,9 @@ mod tests {
             })
             .unzip();
 
-        let iters: Vec<HummockIteratorImpl> = iters
+        let iters: Vec<IteratorType> = iters
             .into_iter()
-            .map(|x| HummockIteratorImpl::new_sstable_iterator(Box::new(x) as BoxedHummockIterator))
+            .map(|x| IteratorType::new_sstable_iterator(Box::new(x) as BoxedHummockIterator))
             .collect_vec();
 
         let mi = MergeIterator::new(iters);
@@ -356,11 +356,11 @@ mod tests {
         ];
         let table1 = add_kv_pair(kv_pairs).await;
 
-        let iters: Vec<HummockIteratorImpl> = vec![
-            HummockIteratorImpl::new_sstable_iterator(Box::new(SSTableIterator::new(Arc::new(
+        let iters: Vec<IteratorType> = vec![
+            IteratorType::new_sstable_iterator(Box::new(SSTableIterator::new(Arc::new(
                 table0,
             )))),
-            HummockIteratorImpl::new_sstable_iterator(Box::new(SSTableIterator::new(Arc::new(
+            IteratorType::new_sstable_iterator(Box::new(SSTableIterator::new(Arc::new(
                 table1,
             )))),
         ];
@@ -400,7 +400,7 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<HummockIteratorImpl> = vec![HummockIteratorImpl::new_sstable_iterator(
+        let iters: Vec<IteratorType> = vec![IteratorType::new_sstable_iterator(
             Box::new(SSTableIterator::new(Arc::new(table))),
         )];
         let mi = MergeIterator::new(iters);
@@ -477,7 +477,7 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<HummockIteratorImpl> = vec![HummockIteratorImpl::new_sstable_iterator(
+        let iters: Vec<IteratorType> = vec![IteratorType::new_sstable_iterator(
             Box::new(SSTableIterator::new(Arc::new(table))),
         )];
         let mi = MergeIterator::new(iters);
@@ -555,7 +555,7 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<HummockIteratorImpl> = vec![HummockIteratorImpl::new_sstable_iterator(
+        let iters: Vec<IteratorType> = vec![IteratorType::new_sstable_iterator(
             Box::new(SSTableIterator::new(Arc::new(table))),
         )];
         let mi = MergeIterator::new(iters);
@@ -635,7 +635,7 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<HummockIteratorImpl> = vec![HummockIteratorImpl::new_sstable_iterator(
+        let iters: Vec<IteratorType> = vec![IteratorType::new_sstable_iterator(
             Box::new(SSTableIterator::new(Arc::new(table))),
         )];
         let mi = MergeIterator::new(iters);

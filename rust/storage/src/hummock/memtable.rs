@@ -1,32 +1,82 @@
 use std::ops::Bound;
+use std::sync::Arc;
 
-use async_trait::async_trait;
 use crossbeam_skiplist::{map, SkipMap};
 
-use super::iterator::{BoxedHummockIterator, HummockIterator};
+use super::iterator::IteratorType;
 use super::value::HummockValue;
 use super::HummockResult;
 
+pub type BoxedMemtableIterator<'a> = Box<dyn MemtableIterator + 'a>;
+
 pub trait MemTable: Send + Sync {
     fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>>;
-    fn get_iterator<'a>(
-        &'a self,
-        range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-    ) -> HummockResult<BoxedHummockIterator>;
+    fn get_iterator(&self, range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> BoxedMemtableIterator;
     fn put(
         &self,
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     ) -> HummockResult<()>;
+    fn is_empty(&self) -> bool;
+    fn epoch(&self) -> u64;
+}
+
+
+pub trait MemtableIterator: Send + Sync {
+    /// Move a valid iterator to the next key.
+    ///
+    /// Note:
+    /// - Before calling this function, make sure the iterator `is_valid`.
+    /// - After calling this function, you may first check whether the iterator `is_valid` again,
+    ///   then get the new data by calling `key` and `value`.
+    /// - If the position after calling this is invalid, this function WON'T return an `Err`. You
+    ///   should check `is_valid` before continuing the iteration.
+    ///
+    /// # Panics
+    /// This function will panic if the iterator is invalid.
+    fn next(&mut self) -> HummockResult<()>;
+
+    /// Retrieve the current key.
+    ///
+    /// Note:
+    /// - Before calling this function, make sure the iterator `is_valid`.
+    /// - This function should be straightforward and return immediately.
+    ///
+    /// # Panics
+    /// This function will panic if the iterator is invalid.
+    // TODO: Add lifetime
+    fn key(&self) -> &[u8];
+
+    /// Retrieve the current value, decoded as [`HummockValue`].
+    ///
+    /// Note:
+    /// - Before calling this function, make sure the iterator `is_valid`.
+    /// - This function should be straightforward and return immediately.
+    ///
+    /// # Panics
+    /// This function will panic if the iterator is invalid, or the value cannot be decoded into
+    /// [`HummockValue`].
+    // TODO: Add lifetime
+    fn value(&self) -> HummockValue<&[u8]>;
+
+    /// Indicate whether the iterator can be used.
+    ///
+    /// Note:
+    /// - ONLY call `key`, `value`, and `next` if `is_valid` returns `true`.
+    /// - This function should be straightforward and return immediately.
+    fn is_valid(&self) -> bool;
 }
 
 pub struct SkiplistMemTable {
-    skiplist: SkipMap<Vec<u8>, HummockValue<Vec<u8>>>,
+    // skiplist: SkipMap<Vec<u8>, HummockValue<Vec<u8>>>,
+    skiplist: Arc<SkipMap<Vec<u8>, HummockValue<Vec<u8>>>>,
+    epoch: u64,
 }
 
 impl SkiplistMemTable {
-    pub fn new() -> Self {
+    pub fn new(epoch: u64) -> Self {
         Self {
-            skiplist: SkipMap::new(),
+            skiplist: Arc::new(SkipMap::new()),
+            epoch,
         }
     }
 }
@@ -39,14 +89,8 @@ impl MemTable for SkiplistMemTable {
         }
     }
 
-    fn get_iterator(
-        &self,
-        range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-    ) -> HummockResult<BoxedHummockIterator> {
-        Ok(Box::new(SkiplistMemTableIterator::new(
-            &self.skiplist,
-            range,
-        )))
+    fn get_iterator(&self, range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> BoxedMemtableIterator {
+        Box::new(SkiplistMemTableIterator::new(self.skiplist.range(range)))
     }
 
     fn put(
@@ -58,40 +102,42 @@ impl MemTable for SkiplistMemTable {
         }
         Ok(())
     }
+
+    fn is_empty(&self) -> bool {
+        self.skiplist.is_empty()
+    }
+
+    fn epoch(&self) -> u64 {
+        self.epoch
+    }
 }
 
 pub struct SkiplistMemTableIterator<'a> {
-    skiplist_ref: &'a SkipMap<Vec<u8>, HummockValue<Vec<u8>>>,
-    range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-    inner: Option<
+    inner:
         map::Range<'a, Vec<u8>, (Bound<Vec<u8>>, Bound<Vec<u8>>), Vec<u8>, HummockValue<Vec<u8>>>,
-    >,
     current: Option<map::Entry<'a, Vec<u8>, HummockValue<Vec<u8>>>>,
-    valid: bool,
 }
 
 impl<'a> SkiplistMemTableIterator<'a> {
     fn new(
-        skiplist_ref: &'a SkipMap<Vec<u8>, HummockValue<Vec<u8>>>,
-        range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        inner: map::Range<
+            'a,
+            Vec<u8>,
+            (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            Vec<u8>,
+            HummockValue<Vec<u8>>,
+        >,
     ) -> Self {
         Self {
-            skiplist_ref,
-            range,
-            inner: None,
-            current: None,
-            valid: false,
+            inner,
+            current: inner.next(),
         }
     }
 }
 
-#[async_trait]
-impl<'a> HummockIterator for SkiplistMemTableIterator<'a> {
-    async fn next(&mut self) -> HummockResult<()> {
-        self.current = self.inner.as_mut().unwrap().next();
-        if self.current.is_none() {
-            self.valid = false;
-        }
+impl<'a> MemtableIterator for SkiplistMemTableIterator<'a> {
+    fn next(&mut self) -> HummockResult<()> {
+        self.current = self.inner.next();
         Ok(())
     }
 
@@ -107,17 +153,29 @@ impl<'a> HummockIterator for SkiplistMemTableIterator<'a> {
     }
 
     fn is_valid(&self) -> bool {
-        self.valid
+        self.current.is_some()
     }
+}
 
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.inner = Some(self.skiplist_ref.range(self.range.clone()));
-        self.valid = true;
-        self.next().await
+pub struct MemTableIteratorBuilder<M: MemTable> {
+    memtable: Arc<M>,
+    epoch: u64,
+    range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+}
+
+impl<M: MemTable> MemTableIteratorBuilder<M> {
+    pub fn new(memtable: Arc<M>, epoch: u64, range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> Self {
+        Self {
+            memtable,
+            epoch,
+            range,
+        }
     }
-
-    async fn seek(&mut self, _key: &[u8]) -> HummockResult<()> {
-        todo!()
+    pub fn build(&self) -> IteratorType {
+        IteratorType::new_memtable_iterator(
+            self.memtable.get_iterator(self.range.clone()),
+            self.epoch,
+        )
     }
 }
 

@@ -1,6 +1,5 @@
-use std::ops::{Deref, DerefMut};
-
 use super::key::split_key_epoch;
+use super::memtable::BoxedMemtableIterator;
 use super::{HummockResult, HummockValue};
 
 mod concat;
@@ -96,52 +95,75 @@ pub trait HummockIterator: Send + Sync {
 
 pub type BoxedHummockIterator<'a> = Box<dyn HummockIterator + 'a>;
 
-pub enum HummockIteratorImpl<'a> {
+pub enum IteratorType<'a> {
     SSTableIterator(BoxedHummockIterator<'a>),
     MemtableIterator {
-        iter: BoxedHummockIterator<'a>,
+        iter: BoxedMemtableIterator<'a>,
         epoch_part: [u8; 8],
     },
 }
 
-impl<'a> HummockIteratorImpl<'a> {
+impl<'a> IteratorType<'a> {
     pub fn new_sstable_iterator(inner: BoxedHummockIterator<'a>) -> Self {
         Self::SSTableIterator(inner)
     }
 
-    pub fn new_memtable_iterator(iter: BoxedHummockIterator<'a>, epoch: u64) -> Self {
+    pub fn new_memtable_iterator(iter: BoxedMemtableIterator<'a>, epoch: u64) -> Self {
         let epoch_part = (u64::MAX - epoch).to_be_bytes();
         Self::MemtableIterator { iter, epoch_part }
+    }
+
+    pub fn is_sstable_iterator(&self) -> bool {
+        match self {
+            IteratorType::SSTableIterator(_) => true,
+            IteratorType::MemtableIterator { .. } => false,
+        }
+    }
+
+    pub fn to_hummock_iterator(&'a self) -> BoxedHummockIterator<'a> {
+        match self {
+            IteratorType::SSTableIterator(i) => *i,
+            IteratorType::MemtableIterator { .. } => panic!(),
+        }
     }
 
     /// Return key parts (`user_key`, `u64::MAX - epoch`) for the full key
     pub fn key_parts(&self) -> (&[u8], &[u8]) {
         match self {
-            HummockIteratorImpl::SSTableIterator(inner) => split_key_epoch(inner.key()),
-            HummockIteratorImpl::MemtableIterator { iter, epoch_part } => (iter.key(), epoch_part),
+            IteratorType::SSTableIterator(inner) => split_key_epoch(inner.key()),
+            IteratorType::MemtableIterator { iter, epoch_part } => (iter.key(), epoch_part),
         }
     }
-}
 
-impl<'a> Deref for HummockIteratorImpl<'a> {
-    type Target = BoxedHummockIterator<'a>;
-
-    fn deref(&self) -> &Self::Target {
+    pub async fn next(&mut self) -> HummockResult<()> {
         match self {
-            HummockIteratorImpl::SSTableIterator(inner) => inner,
-            HummockIteratorImpl::MemtableIterator { iter, .. } => iter,
+            IteratorType::SSTableIterator(inner) => inner.next().await,
+            IteratorType::MemtableIterator { iter, .. } => iter.next(),
+        }
+    }
+
+    pub fn key(&self) -> &[u8] {
+        match self {
+            IteratorType::SSTableIterator(inner) => inner.key(),
+            IteratorType::MemtableIterator { iter, .. } => iter.key(),
+        }
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        match self {
+            IteratorType::SSTableIterator(inner) => inner.value(),
+            IteratorType::MemtableIterator { iter, .. } => iter.value(),
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        match self {
+            IteratorType::SSTableIterator(inner) => inner.is_valid(),
+            IteratorType::MemtableIterator { iter, .. } => iter.is_valid(),
         }
     }
 }
 
-impl<'a> DerefMut for HummockIteratorImpl<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        match self {
-            HummockIteratorImpl::SSTableIterator(inner) => inner,
-            HummockIteratorImpl::MemtableIterator { iter, .. } => iter,
-        }
-    }
-}
 
 pub mod variants {
     pub const FORWARD: usize = 0;

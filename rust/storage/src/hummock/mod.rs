@@ -33,7 +33,7 @@ pub mod version_manager;
 use cloud::gen_remote_sstable;
 use compactor::{Compactor, SubCompactContext};
 pub use error::*;
-use parking_lot::{Mutex as PLMutex, RwLock as PLRwLock};
+use parking_lot::Mutex as PLMutex;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{KeyRange, LevelType, SstableInfo};
 use tokio::select;
@@ -44,7 +44,7 @@ use tokio_retry::RetryIf;
 use value::*;
 
 use self::iterator::{
-    BoxedHummockIterator, ConcatIterator, HummockIterator, HummockIteratorImpl, MergeIterator,
+    BoxedHummockIterator, ConcatIterator, HummockIterator, IteratorType, MergeIterator,
     ReverseMergeIterator, UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
@@ -137,7 +137,7 @@ pub struct HummockStorage {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
     /// epoch -> memtable
-    memtables: Arc<PLRwLock<HashMap<u64, Arc<SkiplistMemTable>>>>,
+    memtables: Arc<PLMutex<HashMap<u64, Arc<SkiplistMemTable>>>>,
 }
 
 impl HummockStorage {
@@ -194,7 +194,7 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
-            memtables: Arc::new(PLRwLock::new(HashMap::new())),
+            memtables: Arc::new(PLMutex::new(HashMap::new())),
         };
         Ok(instance)
     }
@@ -214,7 +214,14 @@ impl HummockStorage {
         self.stats.get_key_size.observe(key.len() as f64);
         let timer = self.stats.get_latency.start_timer();
 
-        let mut table_iters: Vec<HummockIteratorImpl> = Vec::new();
+        let memtable = self.get_memtable(epoch);
+        if let Ok(Some(v)) = memtable.get(key) {
+            timer.observe_duration();
+            self.stats.get_value_size.observe((v.len() + 1) as f64);
+            return Ok(Some(v));
+        }
+
+        let mut table_iters: Vec<IteratorType> = Vec::new();
 
         let version = self.local_version_manager.get_scoped_local_version();
 
@@ -228,7 +235,7 @@ impl HummockStorage {
                         key,
                     )?;
                     table_iters.extend(tables.into_iter().map(|table| {
-                        HummockIteratorImpl::new_sstable_iterator(Box::new(SSTableIterator::new(
+                        IteratorType::new_sstable_iterator(Box::new(SSTableIterator::new(
                             table,
                         ))
                             as BoxedHummockIterator)
@@ -241,7 +248,7 @@ impl HummockStorage {
                             .await?,
                         key,
                     )?;
-                    table_iters.push(HummockIteratorImpl::new_sstable_iterator(Box::new(
+                    table_iters.push(IteratorType::new_sstable_iterator(Box::new(
                         ConcatIterator::new(tables),
                     )))
                 }
@@ -318,20 +325,26 @@ impl HummockStorage {
                 !too_left && !too_right
             });
 
-        let table_iters = overlapped_tables.map(|t| {
-            HummockIteratorImpl::new_sstable_iterator(
+        let key_range = (
+            key_range.start_bound().map(|b| b.as_ref().to_owned()),
+            key_range.end_bound().map(|b| b.as_ref().to_owned()),
+        );
+        let memtable = self.get_memtable(epoch);
+        let memtable_iter = memtable.get_iterator(key_range.clone())?;
+        let mut table_iters = overlapped_tables.map(|t| {
+            IteratorType::new_sstable_iterator(
                 Box::new(SSTableIterator::new(t)) as BoxedHummockIterator
             )
-        });
+        }).collect_vec();
+        
+        table_iters.push(IteratorType::new_memtable_iterator(memtable_iter, epoch));
+
         let mi = MergeIterator::new(table_iters);
 
         // TODO: avoid this clone
         Ok(UserIterator::new_with_epoch(
             mi,
-            (
-                key_range.start_bound().map(|b| b.as_ref().to_owned()),
-                key_range.end_bound().map(|b| b.as_ref().to_owned()),
-            ),
+            key_range,
             epoch,
         ))
     }
@@ -380,7 +393,7 @@ impl HummockStorage {
             });
 
         let reverse_table_iters = overlapped_tables.map(|t| {
-            HummockIteratorImpl::new_sstable_iterator(
+            IteratorType::new_sstable_iterator(
                 Box::new(ReverseSSTableIterator::new(t)) as BoxedHummockIterator
             )
         });
@@ -397,17 +410,16 @@ impl HummockStorage {
         ))
     }
 
-    fn get_memtable_for_write(&self, epoch: u64) -> Arc<SkiplistMemTable> {
+    fn get_memtable(&self, epoch: u64) -> Arc<SkiplistMemTable> {
         self.memtables
-            .write()
+            .lock()
             .entry(epoch)
             .or_insert(Arc::new(SkiplistMemTable::new()))
             .clone()
     }
 
-    fn get_memtable_for_read(&self, epoch: u64) -> Option<Arc<SkiplistMemTable>> {
-        let inner = self.memtables.read();
-        inner.get(&epoch).map(|m| m.clone())
+    fn remove_memtbale(&self, epoch: u64) -> Option<Arc<SkiplistMemTable>> {
+        self.memtables.lock().remove(&epoch)
     }
 
     /// Write batch to storage. The batch should be:
@@ -424,14 +436,14 @@ impl HummockStorage {
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
         epoch: u64,
     ) -> HummockResult<()> {
-        let memtable = self.get_memtable_for_write(epoch);
+        let memtable = self.get_memtable(epoch);
         memtable.put(kv_pairs)?;
         // TODO: do not generate epoch if `kv_pairs` is empty
         self.sync(epoch).await
     }
 
     pub async fn sync(&self, epoch: u64) -> HummockResult<()> {
-        let memtable = self.get_memtable_for_read(epoch);
+        let memtable = self.remove_memtbale(epoch);
         if memtable.is_none() {
             return Ok(());
         }
@@ -552,5 +564,22 @@ impl HummockStorage {
 
     pub fn hummock_meta_client(&self) -> &dyn HummockMetaClient {
         self.hummock_meta_client.as_ref()
+    }
+}
+
+pub struct MemtableCleanupGuard {
+    epoch: u64,
+    memtables: Arc<PLMutex<HashMap<u64, Arc<SkiplistMemTable>>>>,
+}
+
+impl MemtableCleanupGuard {
+    fn new(epoch: u64, memtables: Arc<PLMutex<HashMap<u64, Arc<SkiplistMemTable>>>>) -> Self {
+        Self { epoch, memtables }
+    }
+}
+
+impl Drop for MemtableCleanupGuard {
+    fn drop(&mut self) {
+        self.memtables.lock().remove(&self.epoch);
     }
 }

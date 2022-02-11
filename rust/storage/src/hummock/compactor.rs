@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use futures::stream::{self, StreamExt};
 
-use super::iterator::{ConcatIterator, HummockIterator, HummockIteratorImpl, MergeIterator};
+use super::iterator::{ConcatIterator, HummockIterator, IteratorType, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
@@ -69,14 +69,14 @@ impl Compactor {
             let iter = MergeIterator::new(
                 overlapping_tables
                     .iter()
-                    .map(|table| -> HummockIteratorImpl {
-                        HummockIteratorImpl::new_sstable_iterator(Box::new(SSTableIterator::new(
+                    .map(|table| -> IteratorType {
+                        IteratorType::new_sstable_iterator(Box::new(SSTableIterator::new(
                             table.clone(),
                         )))
                     })
                     .chain(non_overlapping_table_seqs.iter().map(
-                        |tableseq| -> HummockIteratorImpl {
-                            HummockIteratorImpl::new_sstable_iterator(Box::new(
+                        |tableseq| -> IteratorType {
+                            IteratorType::new_sstable_iterator(Box::new(
                                 ConcatIterator::new(tableseq.clone()),
                             ))
                         },
@@ -385,7 +385,7 @@ mod tests {
         let value = hummock_storage.get(&anchor, epoch).await.unwrap().unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111111"));
 
-        let mut table_iters: Vec<HummockIteratorImpl> = Vec::new();
+        let mut table_iters: Vec<IteratorType> = Vec::new();
         let scoped_snapshot =
             ScopedUnpinSnapshot::from_version_manager(hummock_storage.version_manager.clone());
         let snapshot = scoped_snapshot.snapshot();
@@ -398,7 +398,7 @@ mod tests {
                         &anchor,
                     )?;
                     table_iters.extend(tables.into_iter().map(|table| {
-                        HummockIteratorImpl::new_sstable_iterator(Box::new(SSTableIterator::new(
+                        IteratorType::new_sstable_iterator(Box::new(SSTableIterator::new(
                             table,
                         ))
                             as BoxedHummockIterator)
@@ -409,7 +409,7 @@ mod tests {
                         hummock_storage.version_manager.pick_few_tables(table_ids)?,
                         &anchor,
                     )?;
-                    table_iters.push(HummockIteratorImpl::new_sstable_iterator(Box::new(
+                    table_iters.push(IteratorType::new_sstable_iterator(Box::new(
                         ConcatIterator::new(tables),
                     )))
                 }

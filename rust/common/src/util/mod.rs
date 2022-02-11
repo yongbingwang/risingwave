@@ -12,6 +12,7 @@ pub mod encoding_for_comparison;
 pub mod hash_util;
 pub mod ordered;
 pub mod prost;
+pub mod range;
 pub mod sort_util;
 #[macro_use]
 pub mod try_match;

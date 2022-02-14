@@ -449,7 +449,7 @@ impl HummockStorage {
             builder
                 .add_user_key(iter.key().to_vec(), iter.value().to_owned_value(), epoch)
                 .await?;
-            iter.next();
+            iter.next()?;
         }
 
         let (total_size, tables) = {

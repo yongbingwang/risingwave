@@ -125,7 +125,7 @@ impl<'a> SkiplistMemTableIterator<'a> {
             inner,
             current: None,
         };
-        res.next();
+        res.next().unwrap();
         res
     }
 }

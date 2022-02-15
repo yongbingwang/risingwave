@@ -6,6 +6,7 @@ use moka::future::Cache;
 use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 
+use super::memtable::MemtableManager;
 use super::Block;
 use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
 use crate::hummock::{
@@ -131,6 +132,7 @@ impl LocalVersionManager {
     pub async fn update_local_version(
         &self,
         hummock_meta_client: &dyn HummockMetaClient,
+        memtable_manager: &MemtableManager,
     ) -> HummockResult<()> {
         let (new_pinned_version_id, new_pinned_version) = hummock_meta_client.pin_version().await?;
         let versions_to_unpin = {
@@ -151,9 +153,15 @@ impl LocalVersionManager {
                 .map(|(version_id, _ref_count)| version_id)
                 .cloned()
                 .collect_vec();
-            for version_id in &versions_to_unpin {
-                guard.version_ref_counts.remove(version_id).unwrap();
-                guard.pinned_versions.remove(version_id).unwrap();
+            if !versions_to_unpin.is_empty() {
+                let mut max_committed_epoch_in_unpin_version: u64 = 0;
+                for version_id in &versions_to_unpin {
+                    guard.version_ref_counts.remove(version_id).unwrap();
+                    let unpin_version = guard.pinned_versions.remove(version_id).unwrap();
+                    max_committed_epoch_in_unpin_version =
+                        max_committed_epoch_in_unpin_version.max(unpin_version.max_committed_epoch);
+                }
+                memtable_manager.delete_before(max_committed_epoch_in_unpin_version);
             }
             versions_to_unpin
         };

@@ -21,6 +21,8 @@ pub enum HummockError {
     NoCompactTaskFound,
     #[error("Invalid WriteBatch.")]
     InvalidWriteBatch,
+    #[error("Memtable error {0}.")]
+    MemtableError(String),
 }
 
 impl HummockError {
@@ -50,6 +52,10 @@ impl HummockError {
 
     pub fn invalid_write_batch() -> TracedHummockError {
         Self::InvalidWriteBatch.into()
+    }
+
+    pub fn memtable_error(error: impl ToString) -> TracedHummockError {
+        Self::MemtableError(error.to_string()).into()
     }
 }
 

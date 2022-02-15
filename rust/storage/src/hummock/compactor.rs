@@ -7,6 +7,7 @@ use risingwave_pb::hummock::{CompactTask, LevelEntry, LevelType, SstableInfo};
 use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
+use super::memtable::MemtableManager;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::version_cmp::VersionedComparator;
 use super::{
@@ -22,6 +23,7 @@ pub struct SubCompactContext {
     pub local_version_manager: Arc<LocalVersionManager>,
     pub obj_client: Arc<dyn ObjectStore>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
+    pub memtable_manager: Arc<MemtableManager>,
 }
 
 pub struct Compactor;
@@ -75,6 +77,7 @@ impl Compactor {
                 local_version_manager: context.local_version_manager.clone(),
                 obj_client: context.obj_client.clone(),
                 hummock_meta_client: context.hummock_meta_client.clone(),
+                memtable_manager: context.memtable_manager.clone()
             };
             let spawn_kr = KeyRange {
                 left: Bytes::copy_from_slice(kr.get_left()),
@@ -257,7 +260,10 @@ impl Compactor {
         // visible.
         context
             .local_version_manager
-            .update_local_version(context.hummock_meta_client.as_ref())
+            .update_local_version(
+                context.hummock_meta_client.as_ref(),
+                context.memtable_manager.as_ref(),
+            )
             .await?;
 
         report_result?;

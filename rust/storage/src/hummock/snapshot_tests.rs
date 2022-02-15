@@ -1,6 +1,8 @@
 #[cfg(test)]
 use std::sync::Arc;
 
+use risingwave_pb::hummock::SstableInfo;
+
 use super::*;
 use crate::hummock::cloud::gen_remote_sstable;
 use crate::hummock::iterator::test_utils::{
@@ -21,6 +23,7 @@ async fn gen_and_upload_table(
     hummock_meta_client: &dyn HummockMetaClient,
     kv_pairs: Vec<(usize, HummockValue<Vec<u8>>)>,
     epoch: u64,
+    memtable_manager: &MemtableManager
 ) {
     if kv_pairs.is_empty() {
         return;
@@ -54,7 +57,7 @@ async fn gen_and_upload_table(
         .await
         .unwrap();
     // TODO #2336 we need to maintain local version.
-    vm.update_local_version(hummock_meta_client).await.unwrap();
+    vm.update_local_version(hummock_meta_client, memtable_manager).await.unwrap();
 }
 
 macro_rules! assert_count_range_scan {
@@ -112,6 +115,15 @@ async fn test_snapshot() {
     )
     .await
     .unwrap();
+    let (mock_tx, mock_rx) = tokio::sync::mpsc::unbounded_channel();
+    let memtable_manager = MemtableManager::new(
+        Arc::new(HummockOptions::default_for_test()),
+        vm.clone(),
+        obj_client.clone(),
+        mock_tx,
+        DEFAULT_STATE_STORE_STATS.clone(),
+        mock_hummock_meta_client.clone(),
+    );
 
     let epoch1: u64 = 1;
     gen_and_upload_table(
@@ -124,6 +136,7 @@ async fn test_snapshot() {
             (2, HummockValue::Put(b"test".to_vec())),
         ],
         epoch1,
+        &memtable_manager
     )
     .await;
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
@@ -140,6 +153,7 @@ async fn test_snapshot() {
             (4, HummockValue::Put(b"test".to_vec())),
         ],
         epoch2,
+        &memtable_manager
     )
     .await;
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
@@ -157,6 +171,7 @@ async fn test_snapshot() {
             (4, HummockValue::Delete),
         ],
         epoch3,
+        &memtable_manager
     )
     .await;
     assert_count_range_scan!(hummock_storage, .., 0, epoch3);
@@ -186,6 +201,15 @@ async fn test_snapshot_range_scan() {
     )
     .await
     .unwrap();
+    let (mock_tx, mock_rx) = tokio::sync::mpsc::unbounded_channel();
+    let memtable_manager = MemtableManager::new(
+        Arc::new(HummockOptions::default_for_test()),
+        vm.clone(),
+        obj_client.clone(),
+        mock_tx,
+        DEFAULT_STATE_STORE_STATS.clone(),
+        mock_hummock_meta_client.clone(),
+    );
 
     let epoch: u64 = 1;
 
@@ -201,6 +225,7 @@ async fn test_snapshot_range_scan() {
             (4, HummockValue::Put(b"test".to_vec())),
         ],
         epoch,
+        &memtable_manager
     )
     .await;
 
@@ -240,6 +265,14 @@ async fn test_snapshot_reverse_range_scan() {
     )
     .await
     .unwrap();
+    let memtable_manager = MemtableManager::new(
+        Arc::new(HummockOptions::default_for_test()),
+        vm.clone(),
+        obj_client.clone(),
+        mock_tx,
+        DEFAULT_STATE_STORE_STATS.clone(),
+        mock_hummock_meta_client.clone(),
+    );
 
     let epoch = 1;
 
@@ -255,6 +288,7 @@ async fn test_snapshot_reverse_range_scan() {
             (4, HummockValue::Put(b"test".to_vec())),
         ],
         epoch,
+        &memtable_manager
     )
     .await;
 

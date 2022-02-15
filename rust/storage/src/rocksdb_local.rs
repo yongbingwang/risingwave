@@ -1,3 +1,4 @@
+use std::ops::{RangeBounds, Bound};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -38,7 +39,7 @@ impl RocksDBStateStore {
 impl StateStore for RocksDBStateStore {
     type Iter = RocksDBStateStoreIter;
 
-    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         self.stats.get_counts.inc();
         self.storage().await.get(key).await
     }
@@ -47,7 +48,11 @@ impl StateStore for RocksDBStateStore {
         self.storage().await.write_batch(kv_pairs).await
     }
 
-    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
+    async fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         RocksDBStateStoreIter::new(self.clone(), prefix.to_owned()).await
     }
 }
@@ -68,7 +73,10 @@ pub struct RocksDBStateStoreIter {
 }
 
 impl RocksDBStateStoreIter {
-    async fn new(store: RocksDBStateStore, prefix: Vec<u8>) -> Result<Self> {
+    async fn new(
+        store: RocksDBStateStore,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    ) -> Result<Self> {
         let mut iter = store.storage().await.iter().await;
         let end_key = Bytes::from(next_prefix(prefix.as_slice()));
         task::spawn_blocking(move || {

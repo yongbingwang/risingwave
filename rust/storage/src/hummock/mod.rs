@@ -137,7 +137,7 @@ pub struct HummockStorage {
 
     /// Immutable memtables grouped by epoch.
     /// Memtables from the same epoch are non-overlapping.
-    immu_memtables: Arc<PLMutex<BTreeMap<u64, Vec<ImmutableMemtable>>>>,
+    imm_memtables: Arc<PLMutex<BTreeMap<u64, Vec<ImmutableMemtable>>>>,
 }
 
 impl HummockStorage {
@@ -196,7 +196,7 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
-            immu_memtables: Arc::new(PLMutex::new(BTreeMap::new())),
+            imm_memtables: Arc::new(PLMutex::new(BTreeMap::new())),
         };
         Ok(instance)
     }
@@ -218,7 +218,7 @@ impl HummockStorage {
 
         // Init table_iters with memtable iterators.
         let mut table_iters: Vec<BoxedHummockIterator> = {
-            self.immu_memtables
+            self.imm_memtables
                 .lock()
                 .range(0..=epoch)
                 .filter_map(|entry| {
@@ -299,7 +299,7 @@ impl HummockStorage {
         self.stats.range_scan_counts.inc();
 
         let overlapped_memtable_iters = self
-            .immu_memtables
+            .imm_memtables
             .lock()
             .range(0..=epoch)
             .filter_map(|entry| {
@@ -359,7 +359,7 @@ impl HummockStorage {
         self.stats.range_scan_counts.inc();
 
         let overlapped_memtable_iters = self
-            .immu_memtables
+            .imm_memtables
             .lock()
             .range(0..=epoch)
             .filter_map(|entry| {
@@ -421,7 +421,7 @@ impl HummockStorage {
             .map(|i| (FullKey::from_user_key(i.0, epoch).into_inner(), i.1))
             .collect_vec();
         let immu_memtable = ImmutableMemtable::new(full_key_items);
-        self.immu_memtables
+        self.imm_memtables
             .lock()
             .entry(epoch)
             .or_insert(vec![])
@@ -432,7 +432,7 @@ impl HummockStorage {
 
     pub async fn sync(&self, epoch: u64) -> HummockResult<()> {
         let memtables_to_sync = {
-            let guard = self.immu_memtables.lock();
+            let guard = self.imm_memtables.lock();
             guard.get(&epoch).map(|v| v.clone())
         };
 
@@ -508,7 +508,7 @@ impl HummockStorage {
 
         // Delete the corresponding memtables
         {
-            let mut guard = self.immu_memtables.lock();
+            let mut guard = self.imm_memtables.lock();
             let v = guard.get_mut(&epoch).unwrap();
             v.drain(..memtables_to_sync_len);
             if v.is_empty() {

@@ -7,14 +7,21 @@ use async_trait::async_trait;
 use futures::SinkExt;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use tokio::sync::mpsc::error::TryRecvError;
 
+use super::cloud::gen_remote_sstable;
+use super::hummock_meta_client::HummockMetaClient;
 use super::iterator::variants::{BACKWARD, FORWARD};
 use super::iterator::HummockIterator;
-use super::key::user_key;
+use super::key::{user_key, FullKey};
+use super::local_version_manager::LocalVersionManager;
+use super::multi_builder::CapacitySplitTableBuilder;
 use super::utils::range_overlap;
 use super::value::HummockValue;
-use super::{HummockError, HummockResult};
+use super::{HummockError, HummockOptions, HummockResult, HummockStorage};
+use crate::monitor::StateStoreStats;
+use crate::object::ObjectStore;
 
 type MemtableItem = (Vec<u8>, HummockValue<Vec<u8>>);
 
@@ -51,12 +58,20 @@ impl ImmutableMemtable {
         ImmutableMemtableIterator::<BACKWARD>::new(self.inner.clone())
     }
 
-    pub fn start_user_key(&self) -> &[u8] {
+    pub fn start_key(&self) -> &[u8] {
         self.inner.first().unwrap().0.as_slice()
     }
 
-    pub fn end_user_key(&self) -> &[u8] {
+    pub fn end_key(&self) -> &[u8] {
         self.inner.last().unwrap().0.as_slice()
+    }
+
+    pub fn start_user_key(&self) -> &[u8] {
+        user_key(self.inner.first().unwrap().0.as_slice())
+    }
+
+    pub fn end_user_key(&self) -> &[u8] {
+        user_key(self.inner.last().unwrap().0.as_slice())
     }
 
     pub fn into_inner(self) -> Arc<Vec<MemtableItem>> {
@@ -128,24 +143,151 @@ impl<const DIRECTION: usize> HummockIterator for ImmutableMemtableIterator<DIREC
     }
 }
 
+enum MemtableUploaderItem {
+    MEMTABLE(ImmutableMemtable),
+    SYNC(Option<tokio::sync::oneshot::Sender<()>>),
+}
+
 pub struct MemtableUploader {
-    rx: tokio::sync::mpsc::UnboundedReceiver<ImmutableMemtable>,
-    memtables_to_send: Vec<ImmutableMemtable>,
+    memtables_to_upload: Vec<ImmutableMemtable>,
+
+    local_version_manager: Arc<LocalVersionManager>,
+    options: Arc<HummockOptions>,
+    obj_client: Arc<dyn ObjectStore>,
+    /// Notify the compactor to compact after every write_batch().
+    compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
+
+    /// Statistics.
+    stats: Arc<StateStoreStats>,
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
+
+    rx: tokio::sync::mpsc::UnboundedReceiver<MemtableUploaderItem>,
 }
 
 impl MemtableUploader {
-    pub fn new(rx: tokio::sync::mpsc::UnboundedReceiver<ImmutableMemtable>) -> Self {
+    pub fn new(
+        options: Arc<HummockOptions>,
+        local_version_manager: Arc<LocalVersionManager>,
+        obj_client: Arc<dyn ObjectStore>,
+    compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
+        stats: Arc<StateStoreStats>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        rx: tokio::sync::mpsc::UnboundedReceiver<MemtableUploaderItem>,
+    ) -> Self {
         Self {
+            memtables_to_upload: Vec::new(),
+            options,
+            local_version_manager,
+            obj_client,
+            compactor_tx,
+            stats,
+            hummock_meta_client,
             rx,
-            memtables_to_send: Vec::new(),
         }
     }
 
-    pub fn run(&mut self) {
+    async fn sync(&mut self) -> HummockResult<()> {
+        // Sort the memtables. Assume all memtables are non-overlapping.
+        self.memtables_to_upload
+            .sort_by(|l, r| l.start_key().cmp(r.start_key()));
+
+        let get_id_and_builder = || async {
+            let id = self.hummock_meta_client.get_new_table_id().await?;
+            let timer = self.stats.batch_write_build_table_latency.start_timer();
+            let builder = HummockStorage::get_builder(&self.options);
+            timer.observe_duration();
+            Ok((id, builder))
+        };
+        let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
+
+        for m in self.memtables_to_upload {
+            for (k, v) in m.into_inner().iter() {
+                builder
+                    .add_full_key(FullKey::from_slice(k.as_slice()), v.clone(), true)
+                    .await?;
+            }
+        }
+
+        let tables = {
+            let mut tables = Vec::with_capacity(builder.len());
+
+            // TODO: decide upload concurrency
+            for (table_id, blocks, meta) in builder.finish() {
+                let table = gen_remote_sstable(
+                    self.obj_client.clone(),
+                    table_id,
+                    blocks,
+                    meta,
+                    self.options.remote_dir.as_str(),
+                    Some(self.local_version_manager.block_cache.clone()),
+                )
+                .await?;
+                tables.push(table);
+            }
+
+            tables
+        };
+
+        if tables.is_empty() {
+            return Ok(());
+        }
+
+        // Add all tables at once.
+        let timer = self.stats.batch_write_add_l0_latency.start_timer();
+        self.hummock_meta_client
+            .add_tables(
+                epoch,
+                tables
+                    .iter()
+                    .map(|table| SstableInfo {
+                        id: table.id,
+                        key_range: Some(KeyRange {
+                            left: table.meta.smallest_key.clone(),
+                            right: table.meta.largest_key.clone(),
+                            inf: false,
+                        }),
+                    })
+                    .collect_vec(),
+            )
+            .await?;
+        timer.observe_duration();
+
+        // Notify the compactor
+        self.compactor_tx.send(()).ok();
+
+        Ok(())
+    }
+
+    async fn handle(&mut self, item: MemtableUploaderItem) {
+        match item {
+            MemtableUploaderItem::MEMTABLE(m) => {
+                self.memtables_to_upload.push(m);
+            }
+            MemtableUploaderItem::SYNC(tx_opt) => {
+                self.sync().await;
+                if let Some(tx) = tx_opt {
+                    tx.send(());
+                }
+            }
+        }
+    }
+
+    pub async fn run(&mut self) {
         loop {
             match self.rx.try_recv() {
-                Ok(m) => self.memtables_to_send.push(m),
-                Err(TryRecvError::Empty) => {}
+                Ok(m) => {
+                    self.handle(m);
+                }
+                Err(TryRecvError::Empty) => {
+                    // Wait for the next item
+                    // Is there a better way to do this?
+                    match self.rx.recv().await {
+                        Some(m) => {
+                            self.handle(m);
+                        }
+                        None => break,
+                    }
+                }
                 Err(TryRecvError::Disconnected) => break,
             }
         }
@@ -156,7 +298,7 @@ pub struct MemtableManager {
     /// Immutable memtables grouped by (epoch, end_key)
     /// Memtables from the same epoch are non-overlapping.
     imm_memtables: PLRwLock<BTreeMap<u64, BTreeMap<Vec<u8>, ImmutableMemtable>>>,
-    tx: tokio::sync::mpsc::UnboundedSender<ImmutableMemtable>,
+    tx: tokio::sync::mpsc::UnboundedSender<MemtableUploaderItem>,
     uploader: MemtableUploader,
 }
 

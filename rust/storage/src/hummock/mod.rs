@@ -195,7 +195,7 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
-            imm_memtables: Arc::new(PLMutex::new(BTreeMap::new())),
+            memtable_manager: MemtableManager::new(),
         };
         Ok(instance)
     }

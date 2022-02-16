@@ -48,7 +48,7 @@ use self::iterator::{
     UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
-use self::memtable::ImmutableMemtable;
+use self::memtable::{ImmutableMemtable, MemtableManager};
 use self::multi_builder::CapacitySplitTableBuilder;
 pub use self::state_store::*;
 use self::utils::{bloom_filter_sstables, range_overlap};
@@ -135,9 +135,8 @@ pub struct HummockStorage {
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
-    /// Immutable memtables grouped by epoch.
-    /// Memtables from the same epoch are non-overlapping.
-    imm_memtables: Arc<PLMutex<BTreeMap<u64, Vec<ImmutableMemtable>>>>,
+    /// Manager for immutable memtables
+    memtable_manager: Arc<MemtableManager>,
 }
 
 impl HummockStorage {
@@ -417,15 +416,11 @@ impl HummockStorage {
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
         epoch: u64,
     ) -> HummockResult<()> {
-        let full_key_items = kv_pairs
+        let batch = kv_pairs
             .map(|i| (FullKey::from_user_key(i.0, epoch).into_inner(), i.1))
             .collect_vec();
-        let immu_memtable = ImmutableMemtable::new(full_key_items);
-        self.imm_memtables
-            .lock()
-            .entry(epoch)
-            .or_insert(vec![])
-            .push(immu_memtable);
+        let memtable = self.memtable_manager.write_batch(batch, epoch);
+        
         self.sync(epoch).await?;
         Ok(())
     }

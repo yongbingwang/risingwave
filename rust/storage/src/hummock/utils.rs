@@ -18,8 +18,8 @@ pub fn bloom_filter_sstables(
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
-    table_start_key: &[u8],
-    table_end_key: &[u8],
+    inclusive_start_key: &[u8],
+    inclusive_end_key: &[u8],
     reverse: bool,
 ) -> bool
 where
@@ -35,15 +35,15 @@ where
     //        RANGE
     // TABLE
     let too_left = match start_bound {
-        Included(range_start) => range_start.as_ref() > table_end_key,
-        Excluded(range_start) => range_start.as_ref() >= table_end_key,
+        Included(range_start) => range_start.as_ref() > inclusive_end_key,
+        Excluded(range_start) => range_start.as_ref() >= inclusive_end_key,
         Unbounded => false,
     };
     // RANGE
     //        TABLE
     let too_right = match end_bound {
-        Included(range_end) => range_end.as_ref() < table_start_key,
-        Excluded(range_end) => range_end.as_ref() <= table_start_key,
+        Included(range_end) => range_end.as_ref() < inclusive_start_key,
+        Excluded(range_end) => range_end.as_ref() <= inclusive_start_key,
         Unbounded => false,
     };
 

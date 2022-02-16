@@ -1,16 +1,20 @@
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream::ForEach;
+use futures::SinkExt;
 use itertools::Itertools;
-use parking_lot::Mutex as PLMutex;
+use parking_lot::RwLock as PLRwLock;
+use tokio::sync::mpsc::error::TryRecvError;
 
 use super::iterator::variants::{BACKWARD, FORWARD};
 use super::iterator::HummockIterator;
+use super::key::user_key;
 use super::utils::range_overlap;
 use super::value::HummockValue;
+use super::{HummockError, HummockResult};
 
 type MemtableItem = (Vec<u8>, HummockValue<Vec<u8>>);
 
@@ -25,6 +29,20 @@ impl ImmutableMemtable {
             inner: Arc::new(sorted_items),
         }
     }
+
+    pub fn get(&self, key: &[u8]) -> Option<HummockValue<&[u8]>> {
+        match self
+            .inner
+            .binary_search_by(|m| user_key(m.0.as_slice()).cmp(key))
+        {
+            Ok(i) => match &self.inner[i].1 {
+                HummockValue::Put(v) => Some(HummockValue::Put(v.as_slice())),
+                HummockValue::Delete => Some(HummockValue::Delete),
+            },
+            Err(_) => None,
+        }
+    }
+
     pub fn iter(&self) -> ImmutableMemtableIterator<FORWARD> {
         ImmutableMemtableIterator::<FORWARD>::new(self.inner.clone())
     }
@@ -111,32 +129,58 @@ impl<const DIRECTION: usize> HummockIterator for ImmutableMemtableIterator<DIREC
 }
 
 pub struct MemtableUploader {
-    
+    rx: tokio::sync::mpsc::UnboundedReceiver<ImmutableMemtable>,
+    memtables_to_send: Vec<ImmutableMemtable>,
+}
+
+impl MemtableUploader {
+    pub fn new(rx: tokio::sync::mpsc::UnboundedReceiver<ImmutableMemtable>) -> Self {
+        Self {
+            rx,
+            memtables_to_send: Vec::new(),
+        }
+    }
+
+    pub fn run(&mut self) {
+        loop {
+            match self.rx.try_recv() {
+                Ok(m) => self.memtables_to_send.push(m),
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => break,
+            }
+        }
+    }
 }
 
 pub struct MemtableManager {
-    /// Immutable memtables grouped by epoch.
+    /// Immutable memtables grouped by (epoch, end_key)
     /// Memtables from the same epoch are non-overlapping.
-    imm_memtables: Arc<PLMutex<BTreeMap<u64, Vec<ImmutableMemtable>>>>,
-
-    syncing_memtables: Arc<PLMutex<BTreeMap<u64, Vec<ImmutableMemtable>>>>,
+    imm_memtables: PLRwLock<BTreeMap<u64, BTreeMap<Vec<u8>, ImmutableMemtable>>>,
+    tx: tokio::sync::mpsc::UnboundedSender<ImmutableMemtable>,
+    uploader: MemtableUploader,
 }
 
 impl MemtableManager {
     pub fn new() -> Self {
+        // TODO: make channel capacity configurable
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
-            imm_memtables: Arc::new(PLMutex::new(BTreeMap::new())),
-            syncing_memtables: Arc::new(PLMutex::new(BTreeMap::new())),
+            imm_memtables: PLRwLock::new(BTreeMap::new()),
+            tx,
+            uploader: MemtableUploader::new(rx),
         }
     }
 
-    pub fn write_batch(&self, batch: Vec<MemtableItem>, epoch: u64) {
+    pub fn write_batch(&self, batch: Vec<MemtableItem>, epoch: u64) -> HummockResult<()> {
         let immu_memtable = ImmutableMemtable::new(batch);
         self.imm_memtables
-            .lock()
+            .write()
             .entry(epoch)
-            .or_insert(vec![])
-            .push(immu_memtable);
+            .or_insert(BTreeMap::new())
+            .insert(immu_memtable.end_user_key().to_vec(), immu_memtable.clone());
+        self.tx
+            .send(immu_memtable)
+            .map_err(HummockError::memtable_error)
     }
 
     pub fn iters<R, B>(&self, key_range: &R, epoch: u64) -> Vec<ImmutableMemtableIterator<FORWARD>>
@@ -145,15 +189,19 @@ impl MemtableManager {
         B: AsRef<[u8]>,
     {
         self.imm_memtables
-            .lock()
+            .read()
             .range(..=epoch)
-            .chain(self.syncing_memtables.lock().range(..=epoch))
-            .filter_map(|entry| {
+            .flat_map(|entry| {
                 entry
                     .1
-                    .iter()
-                    .find(|m| range_overlap(key_range, m.start_user_key(), m.end_user_key(), false))
-                    .map(|m| m.iter())
+                    .range((
+                        key_range.start_bound().map(|b| b.as_ref().to_vec()),
+                        std::ops::Bound::Unbounded,
+                    ))
+                    .filter(|m| {
+                        range_overlap(key_range, m.1.start_user_key(), m.1.end_user_key(), false)
+                    })
+                    .map(|m| m.1.iter())
             })
             .collect_vec()
     }
@@ -168,17 +216,26 @@ impl MemtableManager {
         B: AsRef<[u8]>,
     {
         self.imm_memtables
-            .lock()
-            .range(0..=epoch)
-            .chain(self.syncing_memtables.lock().range(..=epoch))
-            .filter_map(|entry| {
+            .read()
+            .range(..=epoch)
+            .flat_map(|entry| {
                 entry
                     .1
-                    .iter()
-                    .find(|m| range_overlap(key_range, m.start_user_key(), m.end_user_key(), true))
-                    .map(|m| m.reverse_iter())
+                    .range((
+                        key_range.end_bound().map(|b| b.as_ref().to_vec()),
+                        std::ops::Bound::Unbounded,
+                    ))
+                    .filter(|m| {
+                        range_overlap(key_range, m.1.start_user_key(), m.1.end_user_key(), true)
+                    })
+                    .map(|m| m.1.reverse_iter())
             })
             .collect_vec()
+    }
+
+    /// Memtables of a given epoch is deleted after the epoch is committed.
+    pub fn delete(&self, epoch: u64) {
+        self.imm_memtables.write().remove(&epoch);
     }
 }
 

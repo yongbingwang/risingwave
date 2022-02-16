@@ -1,9 +1,15 @@
+use std::collections::BTreeMap;
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::stream::ForEach;
+use itertools::Itertools;
+use parking_lot::Mutex as PLMutex;
 
 use super::iterator::variants::{BACKWARD, FORWARD};
 use super::iterator::HummockIterator;
+use super::utils::range_overlap;
 use super::value::HummockValue;
 
 type MemtableItem = (Vec<u8>, HummockValue<Vec<u8>>);
@@ -101,6 +107,76 @@ impl<const DIRECTION: usize> HummockIterator for ImmutableMemtableIterator<DIREC
             Err(i) => self.current_idx = i,
         }
         Ok(())
+    }
+}
+
+pub struct MemtableManager {
+    /// Immutable memtables grouped by epoch.
+    /// Memtables from the same epoch are non-overlapping.
+    imm_memtables: Arc<PLMutex<BTreeMap<u64, Vec<ImmutableMemtable>>>>,
+
+    syncing_memtables: Arc<PLMutex<BTreeMap<u64, Vec<ImmutableMemtable>>>>,
+}
+
+impl MemtableManager {
+    pub fn new() -> Self {
+        Self {
+            imm_memtables: Arc::new(PLMutex::new(BTreeMap::new())),
+            syncing_memtables: Arc::new(PLMutex::new(BTreeMap::new())),
+        }
+    }
+
+    pub fn write_batch(&self, batch: Vec<MemtableItem>, epoch: u64) {
+        let immu_memtable = ImmutableMemtable::new(batch);
+        self.imm_memtables
+            .lock()
+            .entry(epoch)
+            .or_insert(vec![])
+            .push(immu_memtable);
+    }
+
+    pub fn sync(&self, epo)
+
+    pub fn iters<R, B>(&self, key_range: &R, epoch: u64) -> Vec<ImmutableMemtableIterator<FORWARD>>
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
+        self.imm_memtables
+            .lock()
+            .range(..=epoch)
+            .chain(self.syncing_memtables.lock().range(..=epoch))
+            .filter_map(|entry| {
+                entry
+                    .1
+                    .iter()
+                    .find(|m| range_overlap(key_range, m.start_user_key(), m.end_user_key(), false))
+                    .map(|m| m.iter())
+            })
+            .collect_vec()
+    }
+
+    pub fn reverse_iters<R, B>(
+        &self,
+        key_range: &R,
+        epoch: u64,
+    ) -> Vec<ImmutableMemtableIterator<BACKWARD>>
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
+        self.imm_memtables
+            .lock()
+            .range(0..=epoch)
+            .chain(self.syncing_memtables.lock().range(..=epoch))
+            .filter_map(|entry| {
+                entry
+                    .1
+                    .iter()
+                    .find(|m| range_overlap(key_range, m.start_user_key(), m.end_user_key(), true))
+                    .map(|m| m.reverse_iter())
+            })
+            .collect_vec()
     }
 }
 

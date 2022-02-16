@@ -110,6 +110,10 @@ impl<const DIRECTION: usize> HummockIterator for ImmutableMemtableIterator<DIREC
     }
 }
 
+pub struct MemtableUploader {
+    
+}
+
 pub struct MemtableManager {
     /// Immutable memtables grouped by epoch.
     /// Memtables from the same epoch are non-overlapping.

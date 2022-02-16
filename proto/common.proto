@@ -26,9 +26,9 @@ message ActorInfo {
 }
 
 enum WorkerType {
-  FRONTEND = 0;
-  COMPUTE_NODE = 1;
-  UNKNOWN = 2;
+  INVALID = 0;
+  FRONTEND = 1;
+  COMPUTE_NODE = 2;
 }
 
 message WorkerNode {

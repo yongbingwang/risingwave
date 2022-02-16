@@ -129,16 +129,18 @@ service HeartbeatService {
 // Below for stream manager.
 message TableFragments {
   enum State {
-    CREATING = 0;
-    CREATED = 1;
-    DROPPING = 2;
-    DROPPED = 3;
+    INVALID = 0;
+    CREATING = 1;
+    CREATED = 2;
+    DROPPING = 3;
+    DROPPED = 4;
   }
   message Fragment {
     enum FragmentType {
-      SOURCE = 0;
-      SINK = 1;
-      OTHERS = 2;
+      INVALID = 0;
+      SOURCE = 1;
+      SINK = 2;
+      OTHERS = 3;
     }
     uint32 fragment_id = 1;
     FragmentType fragment_type = 2;

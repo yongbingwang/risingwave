@@ -509,10 +509,11 @@ impl HummockStorage {
         // Delete the corresponding memtables
         {
             let mut guard = self.imm_memtables.lock();
-            let v = guard.get_mut(&epoch).unwrap();
-            v.drain(..memtables_to_sync_len);
-            if v.is_empty() {
-                guard.remove(&epoch);
+            if let Some(v) = guard.get_mut(&epoch) {
+                v.drain(0..memtables_to_sync_len);
+                if v.is_empty() {
+                    guard.remove(&epoch);
+                }
             }
         }
 

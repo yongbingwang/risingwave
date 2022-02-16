@@ -139,8 +139,6 @@ impl MemtableManager {
             .push(immu_memtable);
     }
 
-    pub fn sync(&self, epo)
-
     pub fn iters<R, B>(&self, key_range: &R, epoch: u64) -> Vec<ImmutableMemtableIterator<FORWARD>>
     where
         R: RangeBounds<B>,

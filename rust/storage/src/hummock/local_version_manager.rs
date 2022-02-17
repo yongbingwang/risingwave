@@ -6,6 +6,7 @@ use moka::future::Cache;
 use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 
+use super::memtable::MemtableManager;
 use super::Block;
 use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
 use crate::hummock::{
@@ -85,6 +86,7 @@ pub struct LocalVersionManager {
     obj_client: Arc<dyn ObjectStore>,
     remote_dir: Arc<String>,
     pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
+    memtable_manager: Arc<MemtableManager>,
 }
 
 impl LocalVersionManager {
@@ -92,6 +94,7 @@ impl LocalVersionManager {
         obj_client: Arc<dyn ObjectStore>,
         remote_dir: &str,
         block_cache: Option<Arc<Cache<Vec<u8>, Arc<Block>>>>,
+        memtable_manager: Arc<MemtableManager>,
     ) -> LocalVersionManager {
         let instance = Self {
             inner: Mutex::new(LocalVersionManagerInner::new()),
@@ -110,6 +113,7 @@ impl LocalVersionManager {
                     panic!("must enable block cache in production mode")
                 }
             },
+            memtable_manager,
         };
         // Insert an artificial empty version.
         instance.inner.lock().pinned_versions.insert(
@@ -151,9 +155,15 @@ impl LocalVersionManager {
                 .map(|(version_id, _ref_count)| version_id)
                 .cloned()
                 .collect_vec();
-            for version_id in &versions_to_unpin {
-                guard.version_ref_counts.remove(version_id).unwrap();
-                guard.pinned_versions.remove(version_id).unwrap();
+            if !versions_to_unpin.is_empty() {
+                let mut max_committed_epoch_in_unpin_version: u64 = 0;
+                for version_id in &versions_to_unpin {
+                    guard.version_ref_counts.remove(version_id).unwrap();
+                    let unpin_version = guard.pinned_versions.remove(version_id).unwrap();
+                    max_committed_epoch_in_unpin_version =
+                        max_committed_epoch_in_unpin_version.max(unpin_version.max_committed_epoch);
+                }
+                self.memtable_manager.delete_before(max_committed_epoch_in_unpin_version);
             }
             versions_to_unpin
         };

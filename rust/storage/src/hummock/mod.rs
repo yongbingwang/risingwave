@@ -54,6 +54,7 @@ pub use self::state_store::*;
 use self::utils::{bloom_filter_sstables, range_overlap};
 use self::version_manager::VersionManager;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
+use crate::bummock::MemRowGroup;
 use crate::hummock::hummock_meta_client::{HummockMetaClient, RetryableError};
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
@@ -172,6 +173,15 @@ impl HummockStorage {
         )
         .await?;
 
+        let memtable_manager = MemtableManager::new(
+            arc_options.clone(),
+            local_version_manager.clone(),
+            obj_client.clone(),
+            trigger_compact_tx.clone(),
+            stats.clone(),
+            hummock_meta_client.clone(),
+        );
+
         let instance = Self {
             options: arc_options,
             version_manager,
@@ -195,7 +205,7 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
-            memtable_manager: MemtableManager::new(),
+            memtable_manager: Arc::new(memtable_manager),
         };
         Ok(instance)
     }
@@ -215,23 +225,13 @@ impl HummockStorage {
         self.stats.get_key_size.observe(key.len() as f64);
         let timer = self.stats.get_latency.start_timer();
 
-        // Init table_iters with memtable iterators.
-        let mut table_iters: Vec<BoxedHummockIterator> = {
-            self.imm_memtables
-                .lock()
-                .range(0..=epoch)
-                .filter_map(|entry| {
-                    entry
-                        .1
-                        .iter()
-                        .find(|m| key >= m.start_user_key() && key <= m.end_user_key())
-                        .map(|m| Box::new(m.iter()) as BoxedHummockIterator)
-                })
-                .collect_vec()
-        };
+        // Query memtable. Return the value without iterating SSTs if found
+        if let Some(v) = self.memtable_manager.get(key, epoch) {
+            return Ok(v.into_put_value().map(|x| x.to_vec()));
+        }
 
         let version = self.local_version_manager.get_scoped_local_version();
-
+        let mut table_iters = Vec::new();
         for level in &version.merged_version() {
             match level.level_type() {
                 LevelType::Overlapping => {
@@ -298,19 +298,10 @@ impl HummockStorage {
         self.stats.range_scan_counts.inc();
 
         let overlapped_memtable_iters = self
-            .imm_memtables
-            .lock()
-            .range(0..=epoch)
-            .filter_map(|entry| {
-                entry
-                    .1
-                    .iter()
-                    .find(|m| {
-                        range_overlap(&key_range, m.start_user_key(), m.end_user_key(), false)
-                    })
-                    .map(|m| Box::new(m.iter()) as BoxedHummockIterator)
-            })
-            .collect_vec();
+            .memtable_manager
+            .iters(&key_range, epoch)
+            .into_iter()
+            .map(|i| Box::new(i) as BoxedHummockIterator);
 
         let version = self.local_version_manager.get_scoped_local_version();
 
@@ -327,11 +318,7 @@ impl HummockStorage {
             })
             .map(|t| Box::new(SSTableIterator::new(t)) as BoxedHummockIterator);
 
-        let mi = MergeIterator::new(
-            overlapped_memtable_iters
-                .into_iter()
-                .chain(overlapped_sstable_iters),
-        );
+        let mi = MergeIterator::new(overlapped_memtable_iters.chain(overlapped_sstable_iters));
 
         // TODO: avoid this clone
         Ok(UserIterator::new_with_epoch(
@@ -358,17 +345,10 @@ impl HummockStorage {
         self.stats.range_scan_counts.inc();
 
         let overlapped_memtable_iters = self
-            .imm_memtables
-            .lock()
-            .range(0..=epoch)
-            .filter_map(|entry| {
-                entry
-                    .1
-                    .iter()
-                    .find(|m| range_overlap(&key_range, m.start_user_key(), m.end_user_key(), true))
-                    .map(|m| Box::new(m.reverse_iter()) as BoxedHummockIterator)
-            })
-            .collect_vec();
+            .memtable_manager
+            .reverse_iters(&key_range, epoch)
+            .into_iter()
+            .map(|i| Box::new(i) as BoxedHummockIterator);
 
         let version = self.local_version_manager.get_scoped_local_version();
 
@@ -385,11 +365,8 @@ impl HummockStorage {
             })
             .map(|t| Box::new(ReverseSSTableIterator::new(t)) as BoxedHummockIterator);
 
-        let reverse_merge_iterator = ReverseMergeIterator::new(
-            overlapped_memtable_iters
-                .into_iter()
-                .chain(overlapped_sstable_iters),
-        );
+        let reverse_merge_iterator =
+            ReverseMergeIterator::new(overlapped_memtable_iters.chain(overlapped_sstable_iters));
 
         // TODO: avoid this clone
         Ok(ReverseUserIterator::new_with_epoch(
@@ -420,107 +397,8 @@ impl HummockStorage {
             .map(|i| (FullKey::from_user_key(i.0, epoch).into_inner(), i.1))
             .collect_vec();
         let memtable = self.memtable_manager.write_batch(batch, epoch);
-        
+
         self.sync(epoch).await?;
-        Ok(())
-    }
-
-    pub async fn sync(&self, epoch: u64) -> HummockResult<()> {
-        let memtables_to_sync = {
-            let guard = self.imm_memtables.lock();
-            guard.get(&epoch).map(|v| v.clone())
-        };
-
-        if memtables_to_sync.is_none() {
-            return Ok(());
-        }
-
-        // Sort the memtables. Assume all memtables are non-overlapping.
-        let mut memtables_to_sync = memtables_to_sync.unwrap();
-        let memtables_to_sync_len = memtables_to_sync.len();
-        memtables_to_sync.sort_by(|l, r| l.start_user_key().cmp(r.start_user_key()));
-
-        let get_id_and_builder = || async {
-            let id = self.hummock_meta_client().get_new_table_id().await?;
-            let timer = self.stats.batch_write_build_table_latency.start_timer();
-            let builder = Self::get_builder(&self.options);
-            timer.observe_duration();
-            Ok((id, builder))
-        };
-        let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
-
-        for m in memtables_to_sync {
-            for (k, v) in m.into_inner().iter() {
-                builder
-                    .add_full_key(FullKey::from_slice(k.as_slice()), v.clone(), true)
-                    .await?;
-            }
-        }
-
-        let tables = {
-            let mut tables = Vec::with_capacity(builder.len());
-
-            // TODO: decide upload concurrency
-            for (table_id, blocks, meta) in builder.finish() {
-                let table = gen_remote_sstable(
-                    self.obj_client.clone(),
-                    table_id,
-                    blocks,
-                    meta,
-                    self.options.remote_dir.as_str(),
-                    Some(self.local_version_manager.block_cache.clone()),
-                )
-                .await?;
-                tables.push(table);
-            }
-
-            tables
-        };
-
-        if tables.is_empty() {
-            return Ok(());
-        }
-
-        // Add all tables at once.
-        let timer = self.stats.batch_write_add_l0_latency.start_timer();
-        self.hummock_meta_client()
-            .add_tables(
-                epoch,
-                tables
-                    .iter()
-                    .map(|table| SstableInfo {
-                        id: table.id,
-                        key_range: Some(KeyRange {
-                            left: table.meta.smallest_key.clone(),
-                            right: table.meta.largest_key.clone(),
-                            inf: false,
-                        }),
-                    })
-                    .collect_vec(),
-            )
-            .await?;
-        timer.observe_duration();
-
-        // Delete the corresponding memtables
-        {
-            let mut guard = self.imm_memtables.lock();
-            if let Some(v) = guard.get_mut(&epoch) {
-                v.drain(0..memtables_to_sync_len);
-                if v.is_empty() {
-                    guard.remove(&epoch);
-                }
-            }
-        }
-
-        // Notify the compactor
-        self.tx.send(()).ok();
-
-        // TODO: #2336 The transaction flow is not ready yet. Before that we update_local_version
-        // after each write_batch to make uncommitted write visible.
-        self.local_version_manager
-            .update_local_version(self.hummock_meta_client())
-            .await?;
-
         Ok(())
     }
 

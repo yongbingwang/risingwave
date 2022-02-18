@@ -105,6 +105,20 @@ where
         }
     }
 
+    async fn create_source(
+        &self,
+        request: Request<CreateSourceRequest>,
+    ) -> Result<Response<CreateSourceResponse>, Status> {
+        todo!()
+    }
+
+    async fn drop_source(
+        &self,
+        request: Request<DropSourceRequest>,
+    ) -> Result<Response<DropSourceResponse>, Status> {
+        todo!()
+    }
+
     #[cfg(not(tarpaulin_include))]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         let _req = request.into_inner();

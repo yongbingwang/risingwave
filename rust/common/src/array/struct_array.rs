@@ -27,6 +27,10 @@ pub struct StructArrayBuilder {
 impl ArrayBuilder for StructArrayBuilder {
     type ArrayType = StructArray;
 
+    fn new(_capacity: usize) -> Result<Self> {
+        panic!("Must use new_with_meta.")
+    }
+
     fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
         if let ArrayMeta::Struct { children } = meta {
             let children_array = children
@@ -150,12 +154,13 @@ impl Array for StructArray {
 }
 
 impl StructArray {
-    pub fn from_protobuf(array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
+    pub fn from_protobuf(array: &ProstArray) -> Result<ArrayImpl> {
         ensure!(
             array.get_values().is_empty(),
             "Must have no buffer in a struct array"
         );
-        let mut builder = StructArrayBuilder::new_with_meta(cardinality, ArrayMeta::Simple)?;
+        let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+        let cardinality = bitmap.len();
         let children = array
             .children_array
             .iter()
@@ -166,16 +171,36 @@ impl StructArray {
             .iter()
             .map(ArrayType::from_protobuf)
             .collect::<Result<Vec<ArrayType>>>()?;
-        let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
         let arr = StructArray {
             bitmap,
             children,
             children_types,
             len: cardinality,
         };
-        builder.append_array(&arr)?;
-        let arr = builder.finish()?;
         Ok(arr.into())
+    }
+
+    pub fn children_array_types(&self) -> &[ArrayType] {
+        &self.children_types
+    }
+
+    #[cfg(test)]
+    pub fn from_slices(null_bitmap: &[bool], children: Vec<ArrayImpl>) -> Result<StructArray> {
+        let cardinality = null_bitmap.len();
+        let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
+        let children_types = children
+            .iter()
+            .map(|a| {
+                assert_eq!(a.len(), cardinality);
+                ArrayType::from_array_impl(a)
+            })
+            .collect::<Result<Vec<ArrayType>>>()?;
+        Ok(StructArray {
+            bitmap,
+            children_types,
+            len: cardinality,
+            children,
+        })
     }
 }
 
@@ -282,5 +307,56 @@ impl Ord for StructRef<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         // The order between two structs is deterministic.
         self.partial_cmp(other).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{array, try_match_expand};
+
+    // Empty struct is allowed in postgres.
+    // `CREATE TYPE foo_empty as ();`, e.g.
+    #[test]
+    fn test_struct_new_empty() {
+        let arr = StructArray::from_slices(&[true, false, true, false], vec![]).unwrap();
+        let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        assert_eq!(ArrayImpl::Struct(arr), actual);
+    }
+
+    #[test]
+    fn test_struct_with_fields() {
+        use crate::array::*;
+        let arr = StructArray::from_slices(
+            &[false, true, false, true],
+            vec![
+                array! { I32Array, [None, Some(1), None, Some(2)] }.into(),
+                array! { F32Array, [None, Some(3.0), None, Some(4.0)] }.into(),
+            ],
+        )
+        .unwrap();
+        let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        assert_eq!(ArrayImpl::Struct(arr), actual);
+
+        let arr = try_match_expand!(actual, ArrayImpl::Struct).unwrap();
+        let struct_values = arr
+            .iter()
+            .map(|v| v.map(|s| s.to_owned_scalar()))
+            .collect_vec();
+        assert_eq!(
+            struct_values,
+            vec![
+                None,
+                Some(StructValue::new(vec![
+                    Some(ScalarImpl::Int32(1)),
+                    Some(ScalarImpl::Float32(3.0.into())),
+                ])),
+                None,
+                Some(StructValue::new(vec![
+                    Some(ScalarImpl::Int32(2)),
+                    Some(ScalarImpl::Float32(4.0.into())),
+                ])),
+            ]
+        );
     }
 }

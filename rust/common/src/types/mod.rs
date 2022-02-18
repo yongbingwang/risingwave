@@ -249,6 +249,7 @@ macro_rules! for_all_scalar_variants {
       { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
       { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
       { Struct, struct, StructValue, StructValue }
+      { Struct, struct, StructValue, StructRef<'scalar> }
     }
   };
 }

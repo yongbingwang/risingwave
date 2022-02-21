@@ -15,7 +15,7 @@ impl Operations {
             true => Workload::new_sequential_keys(opts).1,
             false => {
                 assert!(
-                    opts.reads as usize >= self.keys.len(),
+                    opts.reads as usize <= self.keys.len(),
                     "getseq cannot read more data than KV pairs in the state store"
                 );
 

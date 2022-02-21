@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
-use super::HummockStorage;
+use super::{HummockStorage, HummockResult};
 use crate::hummock::iterator::DirectedUserIterator;
 use crate::{StateStore, StateStoreIter};
 
@@ -74,6 +74,10 @@ impl StateStore for HummockStateStore {
     async fn update_local_version(&self) -> Result<()> {
         self.storage.update_local_version().await?;
         Ok(())
+    }
+
+    async fn sync(&self) -> HummockResult<()> {
+        self.storage.sync().await
     }
 }
 

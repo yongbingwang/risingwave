@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
+use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tracing_futures::Instrument;
 
 use super::{Mutation, StreamConsumer};
@@ -39,6 +40,19 @@ impl Actor {
             let message = self.consumer.next().instrument(span.clone()).await;
             match message {
                 Ok(Some(barrier)) => {
+                    // sync state store when the barrier has flowed through the actor
+                    // TODO: support epoch-based syncing
+                    dispatch_state_store!(&self.context.state_store, store, {
+                        match store.sync().await {
+                            Ok(_) => (),
+                            Err(e) => tracing::info!(
+                                "Failed to sync state store after receving barrier {:?} due to {}",
+                                barrier,
+                                e
+                            ),
+                        }
+                    });
+
                     // collect barriers to local barrier manager
                     self.context
                         .lock_barrier_manager()

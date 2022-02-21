@@ -115,7 +115,7 @@ async fn test_snapshot() {
     )
     .await
     .unwrap();
-    let (mock_tx, mock_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (mock_tx, _) = tokio::sync::mpsc::unbounded_channel();
     let memtable_manager = MemtableManager::new(
         Arc::new(HummockOptions::default_for_test()),
         vm.clone(),
@@ -201,7 +201,7 @@ async fn test_snapshot_range_scan() {
     )
     .await
     .unwrap();
-    let (mock_tx, mock_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (mock_tx, _) = tokio::sync::mpsc::unbounded_channel();
     let memtable_manager = MemtableManager::new(
         Arc::new(HummockOptions::default_for_test()),
         vm.clone(),
@@ -265,6 +265,7 @@ async fn test_snapshot_reverse_range_scan() {
     )
     .await
     .unwrap();
+    let (mock_tx, _) = tokio::sync::mpsc::unbounded_channel();
     let memtable_manager = MemtableManager::new(
         Arc::new(HummockOptions::default_for_test()),
         vm.clone(),

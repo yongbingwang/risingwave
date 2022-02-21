@@ -9,7 +9,7 @@ use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::HummockStateStore;
+use crate::hummock::{HummockStateStore, HummockResult};
 use crate::memory::MemoryStateStore;
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
@@ -96,6 +96,10 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     ///
     /// TODO: remove this after we implement periodical version updating.
     async fn update_local_version(&self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn sync(&self) -> HummockResult<()> {
         Ok(())
     }
 }

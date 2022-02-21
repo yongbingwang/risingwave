@@ -72,6 +72,7 @@ async fn test_compaction_same_key_not_split() {
         local_version_manager: storage.local_version_manager().clone(),
         obj_client: storage.obj_client().clone(),
         hummock_meta_client: storage.hummock_meta_client().clone(),
+        memtable_manager:storage.memtable_manager().clone(),
     };
 
     // 1. add sstables
@@ -86,6 +87,7 @@ async fn test_compaction_same_key_not_split() {
             .await
             .unwrap();
     }
+    storage.memtable_manager().sync().await.unwrap();
 
     // 2. commit epoch
     storage

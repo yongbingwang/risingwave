@@ -5,32 +5,34 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
+use risingwave_common::array::RwError;
+use risingwave_common::error::Result;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use tokio::sync::mpsc::error::TryRecvError;
+use tokio::task::JoinHandle;
 
 use super::cloud::gen_remote_sstable;
 use super::hummock_meta_client::HummockMetaClient;
 use super::iterator::variants::{BACKWARD, FORWARD};
 use super::iterator::HummockIterator;
-
 use super::key::FullKey;
-use super::key;
 use super::local_version_manager::LocalVersionManager;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::utils::range_overlap;
 use super::value::HummockValue;
-use super::{HummockError, HummockOptions, HummockResult, HummockStorage};
+use super::{key, HummockError, HummockOptions, HummockResult, HummockStorage};
 use crate::monitor::StateStoreStats;
 use crate::object::ObjectStore;
 
 type MemtableItem = (Vec<u8>, HummockValue<Vec<u8>>);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ImmutableMemtable {
     inner: Arc<Vec<MemtableItem>>,
     epoch: u64,
 }
 
+#[allow(dead_code)]
 impl ImmutableMemtable {
     pub fn new(sorted_items: Vec<MemtableItem>, epoch: u64) -> Self {
         Self {
@@ -146,13 +148,12 @@ impl<const DIRECTION: usize> HummockIterator for ImmutableMemtableIterator<DIREC
     }
 }
 
-
 pub struct MemtableManager {
     /// Immutable memtables grouped by (epoch, end_key)
     /// Memtables from the same epoch are non-overlapping.
     imm_memtables: PLRwLock<BTreeMap<u64, BTreeMap<Vec<u8>, ImmutableMemtable>>>,
-    tx: tokio::sync::mpsc::UnboundedSender<MemtableUploaderItem>,
-    uploader: MemtableUploader,
+    uploader_tx: tokio::sync::mpsc::UnboundedSender<MemtableUploaderItem>,
+    uploader_handle: JoinHandle<Result<()>>,
 }
 
 impl MemtableManager {
@@ -165,19 +166,21 @@ impl MemtableManager {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
         // TODO: make channel capacity configurable
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (uploader_tx, uploader_rx) = tokio::sync::mpsc::unbounded_channel();
+        let uploader = MemtableUploader::new(
+            options,
+            local_version_manager,
+            obj_client,
+            compactor_tx,
+            stats,
+            hummock_meta_client,
+            uploader_rx,
+        );
+        let uploader_handle = tokio::spawn(uploader.run());
         Self {
             imm_memtables: PLRwLock::new(BTreeMap::new()),
-            tx,
-            uploader: MemtableUploader::new(
-                options,
-                local_version_manager,
-                obj_client,
-                compactor_tx,
-                stats,
-                hummock_meta_client,
-                rx,
-            ),
+            uploader_tx,
+            uploader_handle,
         }
     }
 
@@ -188,15 +191,26 @@ impl MemtableManager {
             .entry(epoch)
             .or_insert(BTreeMap::new())
             .insert(immu_memtable.end_user_key().to_vec(), immu_memtable.clone());
-        self.tx
+        self.uploader_tx
             .send(MemtableUploaderItem::MEMTABLE(immu_memtable))
             .map_err(HummockError::memtable_error)
     }
 
-    pub fn get(&self, user_key: &[u8], epoch: u64) -> Option<HummockValue<Vec<u8>>> {
+    // TODO: support sync memtables from a given epoch
+    pub async fn sync(&self) -> HummockResult<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.uploader_tx.send(MemtableUploaderItem::SYNC(Some(tx))).unwrap();
+        rx.await.unwrap()
+    }
+
+    pub fn get(
+        &self,
+        user_key: &[u8],
+        epoch_range: impl RangeBounds<u64>,
+    ) -> Option<HummockValue<Vec<u8>>> {
         // Search memtables with epoch <= the requested epoch
         let guard = self.imm_memtables.read();
-        for (_, memtables) in guard.range(..=epoch).rev() {
+        for (_, memtables) in guard.range(epoch_range).rev() {
             match memtables.range(user_key.to_vec()..).nth(0) {
                 Some((_, m)) => {
                     if m.start_user_key() > user_key {
@@ -206,20 +220,24 @@ impl MemtableManager {
                         Some(v) => return Some(v),
                         None => continue,
                     }
-                },
+                }
                 None => continue,
             }
         }
         None
     }
-    pub fn iters<R, B>(&self, key_range: &R, epoch: u64) -> Vec<ImmutableMemtableIterator<FORWARD>>
+    pub fn iters<R, B>(
+        &self,
+        key_range: &R,
+        epoch_range: impl RangeBounds<u64>,
+    ) -> Vec<ImmutableMemtableIterator<FORWARD>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
         self.imm_memtables
             .read()
-            .range(..=epoch)
+            .range(epoch_range)
             .flat_map(|entry| {
                 entry
                     .1
@@ -238,7 +256,7 @@ impl MemtableManager {
     pub fn reverse_iters<R, B>(
         &self,
         key_range: &R,
-        epoch: u64,
+        epoch_range: impl RangeBounds<u64>,
     ) -> Vec<ImmutableMemtableIterator<BACKWARD>>
     where
         R: RangeBounds<B>,
@@ -246,7 +264,7 @@ impl MemtableManager {
     {
         self.imm_memtables
             .read()
-            .range(..=epoch)
+            .range(epoch_range)
             .flat_map(|entry| {
                 entry
                     .1
@@ -266,11 +284,18 @@ impl MemtableManager {
     pub fn delete_before(&self, epoch: u64) {
         self.imm_memtables.write().split_off(&(epoch + 1));
     }
+
+    /// This function was called while [`MemtableManager`] exited.
+    pub async fn wait(self) -> Result<()> {
+        self.uploader_handle.await.unwrap()
+    }
 }
 
+#[derive(Debug)]
+#[allow(dead_code)]
 pub enum MemtableUploaderItem {
     MEMTABLE(ImmutableMemtable),
-    SYNC(Option<tokio::sync::oneshot::Sender<()>>),
+    SYNC(Option<tokio::sync::oneshot::Sender<HummockResult<()>>>),
 }
 
 pub struct MemtableUploader {
@@ -280,7 +305,8 @@ pub struct MemtableUploader {
     local_version_manager: Arc<LocalVersionManager>,
     options: Arc<HummockOptions>,
     obj_client: Arc<dyn ObjectStore>,
-    /// Notify the compactor to compact after every write_batch().
+    
+    /// Notify the compactor to compact after every sync().
     compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
 
     /// Statistics.
@@ -389,40 +415,49 @@ impl MemtableUploader {
         Ok(())
     }
 
-    async fn handle(&mut self, item: MemtableUploaderItem) {
+    async fn handle(&mut self, item: MemtableUploaderItem) -> Result<()> {
         match item {
             MemtableUploaderItem::MEMTABLE(m) => {
                 self.max_upload_epoch = self.max_upload_epoch.max(m.epoch());
                 self.memtables_to_upload.push(m);
+                Ok(())
             }
             MemtableUploaderItem::SYNC(tx_opt) => {
-                self.sync().await;
+                let res = self.sync().await;
                 if let Some(tx) = tx_opt {
-                    tx.send(());
+                    tx.send(res).map_err(|_| {
+                        HummockError::memtable_error(
+                            "Failed to notify memtable sync becuase of send drop",
+                        )
+                    })?;
                 }
+                Ok(())
             }
         }
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(mut self) -> Result<()> {
         loop {
             match self.rx.try_recv() {
-                Ok(m) => {
-                    self.handle(m);
-                }
+                Ok(m) => match self.handle(m).await {
+                    Ok(_) => continue,
+                    Err(e) => return Err(RwError::from(e)),
+                },
                 Err(TryRecvError::Empty) => {
                     // Wait for the next item
                     // Is there a better way to do this?
                     match self.rx.recv().await {
-                        Some(m) => {
-                            self.handle(m);
-                        }
+                        Some(m) => match self.handle(m).await {
+                            Ok(_) => continue,
+                            Err(e) => return Err(RwError::from(e)),
+                        },
                         None => break,
                     }
                 }
                 Err(TryRecvError::Disconnected) => break,
             }
         }
+        Ok(())
     }
 }
 

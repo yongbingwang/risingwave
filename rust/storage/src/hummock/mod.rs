@@ -109,9 +109,6 @@ pub struct HummockStorage {
 
     obj_client: Arc<dyn ObjectStore>,
 
-    /// Notify the compactor to compact after every write_batch().
-    tx: mpsc::UnboundedSender<()>,
-
     /// Receiver of the compactor.
     #[allow(dead_code)]
     rx: Arc<PLMutex<Option<mpsc::UnboundedReceiver<()>>>>,
@@ -182,16 +179,10 @@ impl HummockStorage {
             options: arc_options,
             local_version_manager,
             obj_client,
-            tx: trigger_compact_tx,
             rx,
             stop_compact_tx,
             compactor_joinhandle: Arc::new(PLMutex::new(Some(tokio::spawn(async move {
-                Self::start_compactor(
-                    sub_compact_context,
-                    rx_for_compact,
-                    stop_compact_rx,
-                )
-                .await
+                Self::start_compactor(sub_compact_context, rx_for_compact, stop_compact_rx).await
             })))),
             stats,
             hummock_meta_client,
@@ -214,15 +205,18 @@ impl HummockStorage {
         self.stats.get_counts.inc();
         self.stats.get_key_size.observe(key.len() as f64);
         let timer = self.stats.get_latency.start_timer();
+        let version = self.local_version_manager.get_scoped_local_version();
 
         // Query memtable. Return the value without iterating SSTs if found
-        if let Some(v) = self.memtable_manager.get(key, epoch) {
+        if let Some(v) = self
+            .memtable_manager
+            .get(key, (version.max_committed_epoch() + 1)..=epoch)
+        {
             return Ok(v.into_put_value());
         }
 
-        let version = self.local_version_manager.get_scoped_local_version();
         let mut table_iters = Vec::new();
-        for level in &version.merged_version() {
+        for level in &version.levels() {
             match level.level_type() {
                 LevelType::Overlapping => {
                     let tables = bloom_filter_sstables(
@@ -286,19 +280,18 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         self.stats.range_scan_counts.inc();
+        let version = self.local_version_manager.get_scoped_local_version();
 
         let overlapped_memtable_iters = self
             .memtable_manager
-            .iters(&key_range, epoch)
+            .iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
             .into_iter()
             .map(|i| Box::new(i) as BoxedHummockIterator);
-
-        let version = self.local_version_manager.get_scoped_local_version();
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self
             .local_version_manager
-            .tables(&version.merged_version())
+            .tables(&version.levels())
             .await?
             .into_iter()
             .filter(|t| {
@@ -333,19 +326,19 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         self.stats.range_scan_counts.inc();
+        let version = self.local_version_manager.get_scoped_local_version();
 
         let overlapped_memtable_iters = self
             .memtable_manager
-            .reverse_iters(&key_range, epoch)
+            .reverse_iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
             .into_iter()
             .map(|i| Box::new(i) as BoxedHummockIterator);
 
-        let version = self.local_version_manager.get_scoped_local_version();
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self
             .local_version_manager
-            .tables(&version.merged_version())
+            .tables(&version.levels())
             .await?
             .into_iter()
             .filter(|t| {
@@ -390,6 +383,10 @@ impl HummockStorage {
 
         // self.sync(epoch).await?;
         Ok(())
+    }
+
+    pub async fn sync(&self) -> HummockResult<()> {
+        self.memtable_manager.sync().await
     }
 
     pub async fn update_local_version(&self) -> HummockResult<()> {
@@ -449,5 +446,8 @@ impl HummockStorage {
     }
     pub fn obj_client(&self) -> &Arc<dyn ObjectStore> {
         &self.obj_client
+    }
+    pub fn memtable_manager(&self) -> &Arc<MemtableManager> {
+        &self.memtable_manager
     }
 }

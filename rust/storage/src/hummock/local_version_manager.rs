@@ -42,21 +42,12 @@ impl ScopedLocalVersion {
         self.version_id
     }
 
-    pub fn merged_version(&self) -> Vec<Level> {
-        let uncommitted_level = self
-            .version
-            .uncommitted_epochs
-            .iter()
-            .map(|uncommitted| Level {
-                level_type: LevelType::Overlapping as i32,
-                table_ids: uncommitted.table_ids.clone(),
-            });
-        self.version
-            .levels
-            .clone()
-            .into_iter()
-            .chain(uncommitted_level)
-            .collect()
+    pub fn levels(&self) -> Vec<Level> {
+        self.version.levels.clone()
+    }
+
+    pub fn max_committed_epoch(&self) -> u64 {
+        self.version.max_committed_epoch
     }
 }
 

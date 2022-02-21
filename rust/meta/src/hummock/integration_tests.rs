@@ -72,7 +72,7 @@ async fn test_compaction_same_key_not_split() {
         local_version_manager: storage.local_version_manager().clone(),
         obj_client: storage.obj_client().clone(),
         hummock_meta_client: storage.hummock_meta_client().clone(),
-        memtable_manager:storage.memtable_manager().clone(),
+        memtable_manager: storage.memtable_manager().clone(),
     };
 
     // 1. add sstables
@@ -105,18 +105,16 @@ async fn test_compaction_same_key_not_split() {
         .unwrap();
 
     // assert compact_task
-    assert_eq!(
-        compact_task
-            .input_ssts
-            .first()
-            .unwrap()
-            .level
-            .as_ref()
-            .unwrap()
-            .table_ids
-            .len(),
-        kv_count
-    );
+    let table_num_before_compaction = compact_task
+        .input_ssts
+        .first()
+        .unwrap()
+        .level
+        .as_ref()
+        .unwrap()
+        .table_ids
+        .len();
+    assert!(table_num_before_compaction < kv_count && table_num_before_compaction > 1);
 
     // 4. compact
     Compactor::run_compact(&sub_compact_context, &mut compact_task)

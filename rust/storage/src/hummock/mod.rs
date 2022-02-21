@@ -334,7 +334,6 @@ impl HummockStorage {
             .into_iter()
             .map(|i| Box::new(i) as BoxedHummockIterator);
 
-
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self
             .local_version_manager

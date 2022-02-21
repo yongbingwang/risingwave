@@ -9,7 +9,7 @@ use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::{HummockStateStore, HummockResult};
+use crate::hummock::{HummockResult, HummockStateStore};
 use crate::memory::MemoryStateStore;
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;

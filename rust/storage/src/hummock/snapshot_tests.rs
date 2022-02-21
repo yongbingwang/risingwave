@@ -23,7 +23,7 @@ async fn gen_and_upload_table(
     hummock_meta_client: &dyn HummockMetaClient,
     kv_pairs: Vec<(usize, HummockValue<Vec<u8>>)>,
     epoch: u64,
-    memtable_manager: &MemtableManager
+    memtable_manager: &MemtableManager,
 ) {
     if kv_pairs.is_empty() {
         return;
@@ -57,7 +57,9 @@ async fn gen_and_upload_table(
         .await
         .unwrap();
     // TODO #2336 we need to maintain local version.
-    vm.update_local_version(hummock_meta_client, memtable_manager).await.unwrap();
+    vm.update_local_version(hummock_meta_client, memtable_manager)
+        .await
+        .unwrap();
 }
 
 macro_rules! assert_count_range_scan {
@@ -136,7 +138,7 @@ async fn test_snapshot() {
             (2, HummockValue::Put(b"test".to_vec())),
         ],
         epoch1,
-        &memtable_manager
+        &memtable_manager,
     )
     .await;
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
@@ -153,7 +155,7 @@ async fn test_snapshot() {
             (4, HummockValue::Put(b"test".to_vec())),
         ],
         epoch2,
-        &memtable_manager
+        &memtable_manager,
     )
     .await;
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
@@ -171,7 +173,7 @@ async fn test_snapshot() {
             (4, HummockValue::Delete),
         ],
         epoch3,
-        &memtable_manager
+        &memtable_manager,
     )
     .await;
     assert_count_range_scan!(hummock_storage, .., 0, epoch3);
@@ -225,7 +227,7 @@ async fn test_snapshot_range_scan() {
             (4, HummockValue::Put(b"test".to_vec())),
         ],
         epoch,
-        &memtable_manager
+        &memtable_manager,
     )
     .await;
 
@@ -289,7 +291,7 @@ async fn test_snapshot_reverse_range_scan() {
             (4, HummockValue::Put(b"test".to_vec())),
         ],
         epoch,
-        &memtable_manager
+        &memtable_manager,
     )
     .await;
 

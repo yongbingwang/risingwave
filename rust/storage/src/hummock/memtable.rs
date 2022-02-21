@@ -199,7 +199,9 @@ impl MemtableManager {
     // TODO: support sync memtables from a given epoch
     pub async fn sync(&self) -> HummockResult<()> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.uploader_tx.send(MemtableUploaderItem::SYNC(Some(tx))).unwrap();
+        self.uploader_tx
+            .send(MemtableUploaderItem::SYNC(Some(tx)))
+            .unwrap();
         rx.await.unwrap()
     }
 
@@ -305,7 +307,7 @@ pub struct MemtableUploader {
     local_version_manager: Arc<LocalVersionManager>,
     options: Arc<HummockOptions>,
     obj_client: Arc<dyn ObjectStore>,
-    
+
     /// Notify the compactor to compact after every sync().
     compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
 
@@ -461,62 +463,80 @@ impl MemtableUploader {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::sync::Arc;
+#[cfg(test)]
+mod tests {
+    use super::ImmutableMemtable;
+    use crate::hummock::iterator::test_utils::{iterator_test_key_of, iterator_test_key_of_epoch};
+    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::key::user_key;
+    use crate::hummock::value::HummockValue;
 
-//     use rand::distributions::Alphanumeric;
-//     use rand::{thread_rng, Rng};
+    #[tokio::test]
+    async fn test_immutable_memtable() {
+        let epoch = 1;
+        let memtable_items = vec![
+            (
+                iterator_test_key_of_epoch(0, 0, epoch),
+                HummockValue::Put(b"value1".to_vec()),
+            ),
+            (
+                iterator_test_key_of_epoch(0, 1, epoch),
+                HummockValue::Put(b"value2".to_vec()),
+            ),
+            (
+                iterator_test_key_of_epoch(0, 2, epoch),
+                HummockValue::Put(b"value3".to_vec()),
+            ),
+        ];
+        let immutable_mem = ImmutableMemtable::new(memtable_items.clone(), epoch);
 
-//     use super::SkiplistMemTable;
-//     use crate::hummock::memtable::MemTable;
-//     use crate::hummock::value::HummockValue;
+        // Sketch
+        assert_eq!(immutable_mem.start_key(), memtable_items[0].0);
+        assert_eq!(immutable_mem.end_key(), memtable_items[2].0);
+        assert_eq!(
+            immutable_mem.start_user_key(),
+            user_key(memtable_items[0].0.as_slice())
+        );
+        assert_eq!(
+            immutable_mem.end_user_key(),
+            user_key(memtable_items[2].0.as_slice())
+        );
 
-//     fn generate_random_bytes(len: usize) -> Vec<u8> {
-//         thread_rng().sample_iter(&Alphanumeric).take(len).collect()
-//     }
+        // Point lookup
+        for (k, v) in memtable_items.iter() {
+            assert_eq!(immutable_mem.get(user_key(k.as_slice())), Some(v.clone()));
+        }
+        assert_eq!(
+            immutable_mem.get(iterator_test_key_of(0, 3).as_slice()),
+            None
+        );
+        assert_eq!(
+            immutable_mem.get(iterator_test_key_of(1, 0).as_slice()),
+            None
+        );
 
-//     #[tokio::test]
-//     async fn test_memtable() {
-//         // Generate random kv pairs with duplicate keys
-//         let memtable = Arc::new(SkiplistMemTable::new());
-//         let mut kv_pairs: Vec<(Vec<u8>, Vec<HummockValue<Vec<u8>>>)> = vec![];
-//         let mut rng = thread_rng();
-//         for _ in 0..1000 {
-//             let val =
-//                 HummockValue::from(Some(generate_random_bytes(thread_rng().gen_range(1..50))));
-//             if rng.gen_bool(0.5) && kv_pairs.len() > 0 {
-//                 let idx = rng.gen_range(0..kv_pairs.len());
-//                 kv_pairs[idx].1.push(val);
-//             } else {
-//                 let key = generate_random_bytes(thread_rng().gen_range(1..10));
-//                 kv_pairs.push((key, vec![val]))
-//             }
-//         }
+        // Forward iterator
+        let mut iter = immutable_mem.iter();
+        iter.rewind().await.unwrap();
+        let mut output = vec![];
+        while iter.is_valid() {
+            output.push((iter.key().to_owned(), iter.value().to_owned_value()));
+            iter.next().await.unwrap();
+        }
+        assert_eq!(output, memtable_items);
 
-//         // Concurrent put
-//         let mut handles = vec![];
-//         for (key, vals) in kv_pairs.clone() {
-//             let memtable = memtable.clone();
-//             let handle = tokio::spawn(async move {
-//                 let batch: Vec<(Vec<u8>, HummockValue<Vec<u8>>)> =
-//                     vals.into_iter().map(|v| (key.clone(), v)).collect();
-//                 memtable.put(batch.into_iter()).unwrap();
-//             });
-//             handles.push(handle);
-//         }
-
-//         for h in handles {
-//             h.await.unwrap();
-//         }
-
-//         // Concurrent read
-//         for (key, vals) in kv_pairs.clone() {
-//             let memtable = memtable.clone();
-//             tokio::spawn(async move {
-//                 let latest_value = memtable.get(key.as_slice()).unwrap();
-//                 assert_eq!(latest_value, vals.last().unwrap().clone().into_put_value());
-//             });
-//         }
-//     }
-// }
+        // Borward iterator
+        let mut revverse_iter = immutable_mem.reverse_iter();
+        revverse_iter.rewind().await.unwrap();
+        let mut output = vec![];
+        while revverse_iter.is_valid() {
+            output.push((
+                revverse_iter.key().to_owned(),
+                revverse_iter.value().to_owned_value(),
+            ));
+            revverse_iter.next().await.unwrap();
+        }
+        output.reverse();
+        assert_eq!(output, memtable_items);
+    }
+}

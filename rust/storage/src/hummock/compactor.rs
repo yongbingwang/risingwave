@@ -77,7 +77,7 @@ impl Compactor {
                 local_version_manager: context.local_version_manager.clone(),
                 obj_client: context.obj_client.clone(),
                 hummock_meta_client: context.hummock_meta_client.clone(),
-                memtable_manager: context.memtable_manager.clone()
+                memtable_manager: context.memtable_manager.clone(),
             };
             let spawn_kr = KeyRange {
                 left: Bytes::copy_from_slice(kr.get_left()),

@@ -282,12 +282,6 @@ impl HummockStorage {
         self.stats.range_scan_counts.inc();
         let version = self.local_version_manager.get_scoped_local_version();
 
-        let overlapped_memtable_iters = self
-            .memtable_manager
-            .iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
-            .into_iter()
-            .map(|i| Box::new(i) as BoxedHummockIterator);
-
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self
             .local_version_manager
@@ -301,7 +295,16 @@ impl HummockStorage {
             })
             .map(|t| Box::new(SSTableIterator::new(t)) as BoxedHummockIterator);
 
-        let mi = MergeIterator::new(overlapped_memtable_iters.chain(overlapped_sstable_iters));
+        let mi = if version.max_committed_epoch() < epoch {
+            let overlapped_memtable_iters = self
+                .memtable_manager
+                .iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
+                .into_iter()
+                .map(|i| Box::new(i) as BoxedHummockIterator);
+            MergeIterator::new(overlapped_memtable_iters.chain(overlapped_sstable_iters))
+        } else {
+            MergeIterator::new(overlapped_sstable_iters)
+        };
 
         // TODO: avoid this clone
         Ok(UserIterator::new_with_epoch(
@@ -328,12 +331,6 @@ impl HummockStorage {
         self.stats.range_scan_counts.inc();
         let version = self.local_version_manager.get_scoped_local_version();
 
-        let overlapped_memtable_iters = self
-            .memtable_manager
-            .reverse_iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
-            .into_iter()
-            .map(|i| Box::new(i) as BoxedHummockIterator);
-
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self
             .local_version_manager
@@ -347,8 +344,16 @@ impl HummockStorage {
             })
             .map(|t| Box::new(ReverseSSTableIterator::new(t)) as BoxedHummockIterator);
 
-        let reverse_merge_iterator =
-            ReverseMergeIterator::new(overlapped_memtable_iters.chain(overlapped_sstable_iters));
+        let reverse_merge_iterator = if version.max_committed_epoch() < epoch {
+            let overlapped_memtable_iters = self
+                .memtable_manager
+                .reverse_iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
+                .into_iter()
+                .map(|i| Box::new(i) as BoxedHummockIterator);
+            ReverseMergeIterator::new(overlapped_memtable_iters.chain(overlapped_sstable_iters))
+        } else {
+            ReverseMergeIterator::new(overlapped_sstable_iters)
+        };
 
         // TODO: avoid this clone
         Ok(ReverseUserIterator::new_with_epoch(

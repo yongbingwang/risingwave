@@ -153,6 +153,35 @@ impl MockHummockMetaService {
         guard.versions.insert(new_version_id, greatest_version);
         AddTablesResponse { status: None }
     }
+
+    pub fn commit_epoch(&self, epoch: u64) {
+        let mut guard = self.inner.lock();
+        let mut entry = guard.versions.last_entry().unwrap();
+        let mut greatest_version = entry.get_mut();
+        if greatest_version.max_committed_epoch < epoch {
+            greatest_version.max_committed_epoch = epoch;
+            if greatest_version.levels.is_empty() {
+                greatest_version.levels.push(risingwave_pb::hummock::Level {
+                    level_type: 1,
+                    table_ids: vec![],
+                })
+            }
+            let uncommitted_epoch = greatest_version
+                .uncommitted_epochs
+                .drain_filter(|e| e.epoch == epoch)
+                .nth(0)
+                .unwrap();
+            uncommitted_epoch.table_ids.iter().for_each(|id| {
+                greatest_version
+                    .levels
+                    .first_mut()
+                    .unwrap()
+                    .table_ids
+                    .push(*id)
+            });
+            guard.max_committed_epoch = epoch
+        }
+    }
 }
 
 // TODO #2156 add MockMockHummockMetaService tests

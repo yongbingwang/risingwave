@@ -56,6 +56,7 @@ async fn gen_and_upload_table(
         )
         .await
         .unwrap();
+    hummock_meta_client.commit_epoch(epoch).await.unwrap();
     // TODO #2336 we need to maintain local version.
     vm.update_local_version(hummock_meta_client, memtable_manager)
         .await

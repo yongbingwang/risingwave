@@ -271,7 +271,9 @@ mod tests {
 
         // Report to local barrier manager
         for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
-            manager.collect(actor_id, &barrier).unwrap();
+            if let Some(barrier_state) = manager.collect(actor_id, &barrier).unwrap() {
+                barrier_state.notify();
+            }
             let notified = collect_rx.try_recv().is_ok();
             assert_eq!(notified, i == count - 1);
         }

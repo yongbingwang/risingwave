@@ -212,7 +212,7 @@ impl MemtableManager {
     ) -> Option<HummockValue<Vec<u8>>> {
         // Search memtables with epoch <= the requested epoch
         let guard = self.imm_memtables.read();
-        for (_, memtables) in guard.range(epoch_range).rev() {
+        for (_epoch, memtables) in guard.range(epoch_range).rev() {
             match memtables.range(user_key.to_vec()..).nth(0) {
                 Some((_, m)) => {
                     if m.start_user_key() > user_key {
@@ -468,14 +468,16 @@ mod tests {
     use std::sync::Arc;
 
     use super::ImmutableMemtable;
-    use crate::hummock::memtable::MemtableManager;
-    use crate::hummock::{HummockOptions, HummockStorage};
-    use crate::hummock::iterator::test_utils::{iterator_test_key_of, iterator_test_key_of_epoch};
-    use crate::hummock::iterator::HummockIterator;
-    use crate::hummock::key::user_key;
+    use crate::hummock::iterator::test_utils::{
+        iterator_test_key_of, iterator_test_key_of_epoch, test_value_of,
+    };
+    use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator, MergeIterator};
+    use crate::hummock::key::{key_with_epoch, user_key};
     use crate::hummock::local_version_manager::LocalVersionManager;
-    use crate::hummock::mock::{MockHummockMetaService, MockHummockMetaClient};
+    use crate::hummock::memtable::MemtableManager;
+    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::value::HummockValue;
+    use crate::hummock::HummockOptions;
     use crate::monitor::DEFAULT_STATE_STORE_STATS;
     use crate::object::{InMemObjectStore, ObjectStore};
 
@@ -570,71 +572,180 @@ mod tests {
             DEFAULT_STATE_STORE_STATS.clone(),
             mock_hummock_meta_client.clone(),
         );
-        
-        let epoch = 1;
-        let memtable_items = vec![
-            (
-                iterator_test_key_of_epoch(0, 0, epoch),
-                HummockValue::Put(b"value1".to_vec()),
-            ),
-            (
-                iterator_test_key_of_epoch(0, 1, epoch),
-                HummockValue::Put(b"value2".to_vec()),
-            ),
-            (
-                iterator_test_key_of_epoch(0, 2, epoch),
-                HummockValue::Put(b"value3".to_vec()),
-            ),
-        ];
-        let immutable_mem = ImmutableMemtable::new(memtable_items.clone(), epoch);
 
-        // Sketch
-        assert_eq!(immutable_mem.start_key(), memtable_items[0].0);
-        assert_eq!(immutable_mem.end_key(), memtable_items[2].0);
-        assert_eq!(
-            immutable_mem.start_user_key(),
-            user_key(memtable_items[0].0.as_slice())
-        );
-        assert_eq!(
-            immutable_mem.end_user_key(),
-            user_key(memtable_items[2].0.as_slice())
-        );
-
-        // Point lookup
-        for (k, v) in memtable_items.iter() {
-            assert_eq!(immutable_mem.get(user_key(k.as_slice())), Some(v.clone()));
+        let mut keys = Vec::new();
+        for i in 0..4 {
+            keys.push(format!("key_test_{:05}", i).as_bytes().to_vec());
         }
-        assert_eq!(
-            immutable_mem.get(iterator_test_key_of(0, 3).as_slice()),
-            None
-        );
-        assert_eq!(
-            immutable_mem.get(iterator_test_key_of(1, 0).as_slice()),
-            None
-        );
 
-        // Forward iterator
-        let mut iter = immutable_mem.iter();
-        iter.rewind().await.unwrap();
-        let mut output = vec![];
-        while iter.is_valid() {
-            output.push((iter.key().to_owned(), iter.value().to_owned_value()));
-            iter.next().await.unwrap();
+        // Write batch in epoch1
+        let epoch1 = 1;
+        let mut memtable_items1 = Vec::new();
+        for i in 0..3 {
+            memtable_items1.push((
+                key_with_epoch(keys[i].clone(), epoch1),
+                HummockValue::Put(test_value_of(0, i)),
+            ))
         }
-        assert_eq!(output, memtable_items);
+        memtable_manager
+            .write_batch(memtable_items1.clone(), epoch1)
+            .unwrap();
 
-        // Backward iterator
-        let mut revverse_iter = immutable_mem.reverse_iter();
-        revverse_iter.rewind().await.unwrap();
-        let mut output = vec![];
-        while revverse_iter.is_valid() {
-            output.push((
-                revverse_iter.key().to_owned(),
-                revverse_iter.value().to_owned_value(),
+        // Write batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
+        let epoch2 = epoch1 + 1;
+        let mut memtable_items2 = Vec::new();
+        for i in 0..3 {
+            memtable_items2.push((
+                key_with_epoch(keys[i + 1].clone(), epoch2),
+                if i == 1 {
+                    HummockValue::Delete
+                } else {
+                    HummockValue::Put(test_value_of(0, 2 * i))
+                },
             ));
-            revverse_iter.next().await.unwrap();
         }
-        output.reverse();
-        assert_eq!(output, memtable_items);
+        memtable_manager
+            .write_batch(memtable_items2.clone(), epoch2)
+            .unwrap();
+
+        // Get and check value with epoch 0..=epoch1
+        for i in 0..3 {
+            assert_eq!(
+                memtable_manager.get(keys[i].as_slice(), ..=epoch1).unwrap(),
+                memtable_items1[i].1
+            );
+        }
+        assert_eq!(memtable_manager.get(keys[3].as_slice(), ..=epoch1), None);
+
+        // Get and check value with epoch 0..=epoch2
+        assert_eq!(
+            memtable_manager.get(keys[0].as_slice(), ..=epoch2).unwrap(),
+            memtable_items1[0].1
+        );
+        assert_eq!(
+            memtable_manager.get(keys[1].as_slice(), ..=epoch2).unwrap(),
+            memtable_items2[0].1
+        );
+        assert_eq!(
+            memtable_manager.get(keys[2].as_slice(), ..=epoch2).unwrap(),
+            HummockValue::Delete
+        );
+        assert_eq!(
+            memtable_manager.get(keys[3].as_slice(), ..=epoch2).unwrap(),
+            memtable_items2[2].1
+        );
+
+        // Get and check value with epoch epoch2..=epoch2
+        assert_eq!(
+            memtable_manager.get(keys[0].as_slice(), epoch2..=epoch2),
+            None
+        );
+        for i in 0..3 {
+            assert_eq!(
+                memtable_manager
+                    .get(keys[i + 1].as_slice(), epoch2..=epoch2)
+                    .unwrap(),
+                memtable_items2[i].1
+            );
+        }
+
+        // Forward iterator with 0..=epoch1
+        let range = keys[0].clone()..=keys[3].clone();
+        let iters = memtable_manager.iters(&range, ..=epoch1);
+        assert_eq!(iters.len(), 1);
+        let mut merge_iterator = MergeIterator::new(
+            iters
+                .into_iter()
+                .map(|i| Box::new(i) as BoxedHummockIterator),
+        );
+        merge_iterator.rewind().await.unwrap();
+        for i in 0..3 {
+            assert!(merge_iterator.is_valid());
+            assert_eq!(
+                merge_iterator.key(),
+                key_with_epoch(keys[i].clone(), epoch1)
+            );
+            assert_eq!(
+                merge_iterator.value().to_owned_value(),
+                memtable_items1[i].1
+            );
+            merge_iterator.next().await.unwrap();
+        }
+        assert!(!merge_iterator.is_valid());
+
+        // Forward iterator with 0..=epoch2
+        let iters = memtable_manager.iters(&range, ..=epoch2);
+        assert_eq!(iters.len(), 2);
+        let mut merge_iterator = MergeIterator::new(
+            iters
+                .into_iter()
+                .map(|i| Box::new(i) as BoxedHummockIterator),
+        );
+        merge_iterator.rewind().await.unwrap();
+        assert!(merge_iterator.is_valid());
+        assert_eq!(
+            merge_iterator.key(),
+            key_with_epoch(keys[0].clone(), epoch1)
+        );
+        assert_eq!(
+            merge_iterator.value().to_owned_value(),
+            memtable_items1[0].1
+        );
+        merge_iterator.next().await.unwrap();
+        for i in 0..2 {
+            assert!(merge_iterator.is_valid());
+            assert_eq!(
+                merge_iterator.key(),
+                key_with_epoch(keys[i + 1].clone(), epoch2)
+            );
+            assert_eq!(
+                merge_iterator.value().to_owned_value(),
+                memtable_items2[i].1
+            );
+            merge_iterator.next().await.unwrap();
+            assert_eq!(
+                merge_iterator.key(),
+                key_with_epoch(keys[i + 1].clone(), epoch1)
+            );
+            assert_eq!(
+                merge_iterator.value().to_owned_value(),
+                memtable_items1[i + 1].1
+            );
+            merge_iterator.next().await.unwrap();
+        }
+        assert!(merge_iterator.is_valid());
+        assert_eq!(
+            merge_iterator.key(),
+            key_with_epoch(keys[3].clone(), epoch2)
+        );
+        assert_eq!(
+            merge_iterator.value().to_owned_value(),
+            memtable_items2[2].1
+        );
+        merge_iterator.next().await.unwrap();
+        assert!(!merge_iterator.is_valid());
+
+        // Forward iterator with epoch2..=epoch2
+        let iters = memtable_manager.iters(&range, epoch2..=epoch2);
+        assert_eq!(iters.len(), 1);
+        let mut merge_iterator = MergeIterator::new(
+            iters
+                .into_iter()
+                .map(|i| Box::new(i) as BoxedHummockIterator),
+        );
+        merge_iterator.rewind().await.unwrap();
+        for i in 0..3 {
+            assert!(merge_iterator.is_valid());
+            assert_eq!(
+                merge_iterator.key(),
+                key_with_epoch(keys[i + 1].clone(), epoch2)
+            );
+            assert_eq!(
+                merge_iterator.value().to_owned_value(),
+                memtable_items2[i].1
+            );
+            merge_iterator.next().await.unwrap();
+        }
+        assert!(!merge_iterator.is_valid());
     }
 }

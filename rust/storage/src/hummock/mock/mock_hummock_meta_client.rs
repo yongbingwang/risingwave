@@ -94,8 +94,9 @@ impl HummockMetaClient for MockHummockMetaClient {
         unimplemented!()
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
-        unimplemented!()
+    async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
+        self.mock_hummock_meta_service.commit_epoch(epoch);
+        Ok(())
     }
 
     async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {

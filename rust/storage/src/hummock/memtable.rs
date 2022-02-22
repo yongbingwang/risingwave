@@ -465,11 +465,19 @@ impl MemtableUploader {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::ImmutableMemtable;
+    use crate::hummock::memtable::MemtableManager;
+    use crate::hummock::{HummockOptions, HummockStorage};
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, iterator_test_key_of_epoch};
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::key::user_key;
+    use crate::hummock::local_version_manager::LocalVersionManager;
+    use crate::hummock::mock::{MockHummockMetaService, MockHummockMetaClient};
     use crate::hummock::value::HummockValue;
+    use crate::monitor::DEFAULT_STATE_STORE_STATS;
+    use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
     async fn test_immutable_memtable() {
@@ -525,7 +533,97 @@ mod tests {
         }
         assert_eq!(output, memtable_items);
 
-        // Borward iterator
+        // Backward iterator
+        let mut revverse_iter = immutable_mem.reverse_iter();
+        revverse_iter.rewind().await.unwrap();
+        let mut output = vec![];
+        while revverse_iter.is_valid() {
+            output.push((
+                revverse_iter.key().to_owned(),
+                revverse_iter.value().to_owned_value(),
+            ));
+            revverse_iter.next().await.unwrap();
+        }
+        output.reverse();
+        assert_eq!(output, memtable_items);
+    }
+
+    #[tokio::test]
+    async fn test_memtable_manager() {
+        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+        let remote_dir = "/test";
+        let vm = Arc::new(LocalVersionManager::new(
+            obj_client.clone(),
+            remote_dir,
+            None,
+        ));
+        let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
+        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+            mock_hummock_meta_service.clone(),
+        ));
+        let (mock_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let memtable_manager = MemtableManager::new(
+            Arc::new(HummockOptions::default_for_test()),
+            vm.clone(),
+            obj_client.clone(),
+            mock_tx,
+            DEFAULT_STATE_STORE_STATS.clone(),
+            mock_hummock_meta_client.clone(),
+        );
+        
+        let epoch = 1;
+        let memtable_items = vec![
+            (
+                iterator_test_key_of_epoch(0, 0, epoch),
+                HummockValue::Put(b"value1".to_vec()),
+            ),
+            (
+                iterator_test_key_of_epoch(0, 1, epoch),
+                HummockValue::Put(b"value2".to_vec()),
+            ),
+            (
+                iterator_test_key_of_epoch(0, 2, epoch),
+                HummockValue::Put(b"value3".to_vec()),
+            ),
+        ];
+        let immutable_mem = ImmutableMemtable::new(memtable_items.clone(), epoch);
+
+        // Sketch
+        assert_eq!(immutable_mem.start_key(), memtable_items[0].0);
+        assert_eq!(immutable_mem.end_key(), memtable_items[2].0);
+        assert_eq!(
+            immutable_mem.start_user_key(),
+            user_key(memtable_items[0].0.as_slice())
+        );
+        assert_eq!(
+            immutable_mem.end_user_key(),
+            user_key(memtable_items[2].0.as_slice())
+        );
+
+        // Point lookup
+        for (k, v) in memtable_items.iter() {
+            assert_eq!(immutable_mem.get(user_key(k.as_slice())), Some(v.clone()));
+        }
+        assert_eq!(
+            immutable_mem.get(iterator_test_key_of(0, 3).as_slice()),
+            None
+        );
+        assert_eq!(
+            immutable_mem.get(iterator_test_key_of(1, 0).as_slice()),
+            None
+        );
+
+        // Forward iterator
+        let mut iter = immutable_mem.iter();
+        iter.rewind().await.unwrap();
+        let mut output = vec![];
+        while iter.is_valid() {
+            output.push((iter.key().to_owned(), iter.value().to_owned_value()));
+            iter.next().await.unwrap();
+        }
+        assert_eq!(output, memtable_items);
+
+        // Backward iterator
         let mut revverse_iter = immutable_mem.reverse_iter();
         revverse_iter.rewind().await.unwrap();
         let mut output = vec![];

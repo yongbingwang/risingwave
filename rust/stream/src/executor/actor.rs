@@ -40,23 +40,29 @@ impl Actor {
             let message = self.consumer.next().instrument(span.clone()).await;
             match message {
                 Ok(Some(barrier)) => {
-                    // sync state store when the barrier has flowed through the actor
-                    // TODO: support epoch-based syncing
-                    dispatch_state_store!(&self.context.state_store, store, {
-                        match store.sync().await {
-                            Ok(_) => (),
-                            Err(e) => tracing::info!(
+                    // collect barriers to local barrier manager
+                    let collect_res = self
+                        .context
+                        .lock_barrier_manager()
+                        .collect(self.id, &barrier)?;
+
+                    if let Some(barrier_state) = collect_res {
+                        // sync state store when the barrier has flowed through all actors
+                        // TODO: support epoch-based syncing
+                        // TODO: make this async
+                        dispatch_state_store!(&self.context.state_store, store, {
+                            match store.sync().await {
+                                Ok(_) => (),
+                                Err(e) => tracing::info!(
                                 "Failed to sync state store after receving barrier {:?} due to {}",
                                 barrier,
                                 e
                             ),
-                        }
-                    });
-
-                    // collect barriers to local barrier manager
-                    self.context
-                        .lock_barrier_manager()
-                        .collect(self.id, &barrier)?;
+                            }
+                        });
+                        // Notify about barrier finishing.
+                        barrier_state.notify();
+                    }
 
                     // then stop this actor if asked
                     if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {

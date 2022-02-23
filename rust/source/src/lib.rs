@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 pub use high_level_kafka::*;
 pub use manager::*;
+pub use nexmark::*;
 pub use parser::*;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::ColumnId;
@@ -27,14 +28,18 @@ pub mod parser;
 mod high_level_kafka;
 mod manager;
 
+mod nexmark;
+
 mod common;
 mod table_v2;
 
 extern crate maplit;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum SourceConfig {
     Kafka(HighLevelKafkaSourceConfig),
+    NEXMark(NEXMarkSourceConfig),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +55,7 @@ pub enum SourceFormat {
 pub enum SourceImpl {
     HighLevelKafka(HighLevelKafkaSource),
     TableV2(TableSourceV2),
+    NEXMark(NEXMarkSource),
 }
 
 impl SourceImpl {

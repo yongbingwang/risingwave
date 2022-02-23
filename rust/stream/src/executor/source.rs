@@ -68,6 +68,9 @@ impl SourceExecutor {
             SourceImpl::TableV2(s) => {
                 Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
             }
+            SourceImpl::NEXMark(s) => {
+                Box::new(s.stream_reader(NEXMarkSourceReaderContext {}, column_ids.clone())?)
+            }
         };
         let source_identify = "Table_".to_string() + &source_id.table_id().to_string();
         let meter = DEFAULT_COMPUTE_STATS

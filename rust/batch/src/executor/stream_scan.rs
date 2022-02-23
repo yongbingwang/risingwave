@@ -72,6 +72,9 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             SourceImpl::TableV2(_) => {
                 panic!("use table_scan to scan a table")
             }
+            SourceImpl::NEXMark(_) => {
+                panic!("nexmark source not implemented")
+            }
         };
 
         Ok(Box::new(Self {

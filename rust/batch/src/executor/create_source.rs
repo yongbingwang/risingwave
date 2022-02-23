@@ -10,8 +10,8 @@ use risingwave_pb::plan::create_source_node::RowFormatType;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_source::parser::JSONParser;
 use risingwave_source::{
-    DebeziumJsonParser, HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig,
-    SourceFormat, SourceManagerRef, SourceParser,
+    DebeziumJsonParser, HighLevelKafkaSourceConfig, NEXMarkSourceConfig, ProtobufParser,
+    SourceColumnDesc, SourceConfig, SourceFormat, SourceManagerRef, SourceParser,
 };
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -19,6 +19,7 @@ use crate::executor::{Executor, ExecutorBuilder};
 
 const UPSTREAM_SOURCE_KEY: &str = "upstream.source";
 const KAFKA_SOURCE: &str = "kafka";
+const NEXMARK_SOURCE: &str = "nexmark";
 
 const KAFKA_TOPIC_KEY: &str = "kafka.topic";
 const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";
@@ -59,6 +60,10 @@ impl CreateSourceExecutor {
             topic: get_from_properties!(properties, KAFKA_TOPIC_KEY).clone(),
             properties: Default::default(),
         }))
+    }
+
+    fn extract_nexmark_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
+        Ok(SourceConfig::NEXMark(NEXMarkSourceConfig::new(properties)))
     }
 }
 
@@ -106,6 +111,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
 
         let config = match get_from_properties!(properties, UPSTREAM_SOURCE_KEY).as_str() {
             KAFKA_SOURCE => CreateSourceExecutor::extract_kafka_config(properties),
+            NEXMARK_SOURCE => CreateSourceExecutor::extract_nexmark_config(properties),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other

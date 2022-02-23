@@ -10,7 +10,9 @@ use risingwave_storage::table::ScannableTableRef;
 use risingwave_storage::TableColumnDesc;
 
 use crate::table_v2::TableSourceV2;
-use crate::{HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser};
+use crate::{
+    HighLevelKafkaSource, NEXMarkSource, SourceConfig, SourceFormat, SourceImpl, SourceParser,
+};
 
 pub type SourceRef = Arc<SourceImpl>;
 
@@ -93,6 +95,10 @@ impl SourceManager for MemSourceManager {
                 config.clone(),
                 Arc::new(columns.clone()),
                 parser.clone(),
+            )),
+            SourceConfig::NEXMark(config) => SourceImpl::NEXMark(NEXMarkSource::new(
+                config.clone(),
+                Arc::new(columns.clone()),
             )),
         };
 

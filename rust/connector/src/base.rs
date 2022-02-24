@@ -1,4 +1,6 @@
-use anyhow::Result;
+use std::collections::{BTreeMap, HashMap};
+use std::hash::Hash;
+use risingwave_common::error::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -7,6 +9,10 @@ pub enum SourceOffset {
     Number(i64),
     String(String),
 }
+
+use crate::kafka;
+use crate::pulsar;
+
 
 pub trait SourceMessage {
     fn payload(&self) -> Result<Option<&[u8]>>;
@@ -36,4 +42,15 @@ pub trait SourceReader: Sized {
 pub trait SplitEnumerator {
     type Split: SourceSplit + Send + Sync;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
+}
+
+pub enum SplitEnumeratorImpl {
+    Kafka(kafka::enumerator::KafkaSplitEnumerator),
+    Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
+}
+
+const UPSTREAM_SOURCE: String = "upstream.source".to_string();
+
+pub fn extract_split_enumerator(properties: &HashMap<String, String>) -> Result<SplitEnumeratorImpl> {
+    todo!()
 }

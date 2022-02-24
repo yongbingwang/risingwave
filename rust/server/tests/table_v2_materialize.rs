@@ -18,7 +18,8 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Keyspace, StateStoreImpl};
 use risingwave_stream::executor::{
-    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
+    Barrier, Epoch, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
+    SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -61,8 +62,8 @@ impl BatchExecutor for SingleChunkExecutor {
     }
 }
 
-/// This test checks whether batch task and streaming task work together for `TableV2` creation and
-/// materialization.
+/// This test checks whether batch task and streaming task work together for `TableV2` creation
+/// and materialization.
 #[tokio::test]
 async fn test_table_v2_materialize() -> Result<()> {
     let memory_state_store = MemoryStateStore::new();
@@ -154,7 +155,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
     let columns = vec![Column::new(Arc::new(
-        array_nonnull! { F64Array, [1.14, 5.14] }.into(),
+        array_nonnull! { F64Array, [1.14f64, 5.14f64] }.into(),
     ))];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
     let insert_inner = SingleChunkExecutor::new(chunk, all_schema);
@@ -197,12 +198,16 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Send a barrier and poll again, should write changes to storage
     barrier_tx
-        .send(Message::Barrier(Barrier::new(1919)))
+        .send(Message::Barrier(Barrier::new_test_barrier(1919)))
         .unwrap();
 
     assert!(matches!(
         materialize.next().await?,
-        Message::Barrier(Barrier { epoch: 1919, .. })
+        Message::Barrier(Barrier {
+            epoch,
+            mutation: None,
+            ..
+        }) if epoch == Epoch::new_test_epoch(1919)
     ));
 
     // Scan the table again, we are able to get the data now!

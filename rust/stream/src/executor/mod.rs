@@ -339,6 +339,59 @@ pub trait Executor: Send + Debug + 'static {
     }
 }
 
+#[derive(Debug)]
+pub enum ExecutorState {
+    /// Waiting for the first barrier
+    INIT((u64, u32)),
+    /// Can read from and write to storage
+    ACTIVE(u64),
+}
+
+impl ExecutorState {
+    pub fn new(num_pending_barrier: u32) -> Self {
+        ExecutorState::INIT((INVALID_EPOCH, num_pending_barrier))
+    }
+
+    pub fn epoch(&self) -> u64 {
+        match self {
+            ExecutorState::INIT(_) => panic!("Executor is not active when getting the epoch"),
+            ExecutorState::ACTIVE(epoch) => *epoch,
+        }
+    }
+}
+
+pub trait StatefuleExecutor: Executor {
+    fn executor_state(&self) -> &ExecutorState;
+
+    fn update_executor_state(&mut self, new_state: ExecutorState);
+
+    /// Try initializing the executor if not done.
+    /// Return:
+    /// - Some(Epoch) if the executor is successfully initialized
+    /// - None if the executor has been intialized
+    fn try_init_executor<E: AggExecutor>(&mut self, msg: &Message) -> Option<Epoch> {
+        match self.executor_state() {
+            ExecutorState::INIT((epoch, num_pending_barrier)) => {
+                if let Message::Barrier(barrier) = &msg {
+                    if epoch != INVALID_EPOCH {
+                        assert_eq!(epoch, barrier.epoch.curr);
+                    }
+                    let next_state = if num_pending_barrier == 1 {
+                        ExecutorState::ACTIVE(barrier.epoch.curr)
+                    } else {
+                        ExecutorState::ACTIVE((barrier.epoch.curr, num_pending_barrier - 1))
+                    };
+                    self.update_executor_state(next_state);
+                    Some(barrier.epoch.clone())
+                } else {
+                    panic!("The first message the executor receives is not a barrier");
+                }
+            }
+            ExecutorState::ACTIVE(_) => None,
+        }
+    }
+}
+
 pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;

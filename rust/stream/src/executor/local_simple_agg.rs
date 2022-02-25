@@ -9,7 +9,7 @@ use risingwave_common::error::Result;
 
 use super::{
     agg_executor_next, create_streaming_agg_state, generate_agg_schema, AggCall, AggExecutor,
-    Barrier, Executor, Message, PkIndices, PkIndicesRef, StreamingAggStateImpl,
+    Barrier, Executor, Message, PkIndices, PkIndicesRef, StreamingAggStateImpl, ExecutorState, StatefuleExecutor,
 };
 
 #[derive(Debug)]
@@ -41,8 +41,9 @@ pub struct LocalSimpleAggExecutor {
 
     /// Logical Operator Info
     op_info: String,
-    /// Epoch
-    epoch: Option<u64>,
+
+    /// Executor state
+    executor_state: ExecutorState
 }
 
 impl LocalSimpleAggExecutor {
@@ -76,7 +77,7 @@ impl LocalSimpleAggExecutor {
             agg_calls,
             identity: format!("LocalSimpleAggExecutor {:X}", executor_id),
             op_info,
-            epoch: None,
+            executor_state: ExecutorState::new(1),
         })
     }
 }
@@ -106,14 +107,6 @@ impl Executor for LocalSimpleAggExecutor {
 
 #[async_trait]
 impl AggExecutor for LocalSimpleAggExecutor {
-    fn current_epoch(&self) -> Option<u64> {
-        self.epoch
-    }
-
-    fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = Some(new_epoch);
-    }
-
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
         &mut self.cached_barrier_message
     }
@@ -160,6 +153,16 @@ impl AggExecutor for LocalSimpleAggExecutor {
 
     fn input(&mut self) -> &mut dyn Executor {
         self.input.as_mut()
+    }
+}
+
+impl StatefuleExecutor for LocalSimpleAggExecutor {
+    fn executor_state(&self) -> &ExecutorState {
+        &self.executor_state
+    }
+
+    fn update_executor_state(&mut self, new_state: ExecutorState) {
+        self.executor_state = new_state;
     }
 }
 

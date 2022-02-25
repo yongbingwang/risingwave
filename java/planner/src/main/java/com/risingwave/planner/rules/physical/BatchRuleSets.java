@@ -39,10 +39,23 @@ import org.apache.calcite.rel.rules.ProjectJoinTransposeRule;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.tools.RuleSet;
 import org.apache.calcite.tools.RuleSets;
+import org.apache.flink.table.planner.plan.rules.logical.FlinkJoinPushExpressionsRule;
+import org.apache.flink.table.planner.plan.rules.logical.FlinkRewriteSubQueryRule;
+import org.apache.flink.table.planner.plan.rules.logical.FlinkSubQueryRemoveRule;
+import org.apache.flink.table.planner.plan.rules.logical.JoinConditionTypeCoerceRule;
+import org.apache.flink.table.planner.plan.rules.logical.SimplifyFilterConditionRule;
 
 /** Planner rule sets. */
 public class BatchRuleSets {
   private BatchRuleSets() {}
+
+  public static final RuleSet SEMI_JOIN_RULES =
+      RuleSets.ofList(
+          SimplifyFilterConditionRule.EXTENDED(),
+          FlinkRewriteSubQueryRule.FILTER(),
+          FlinkSubQueryRemoveRule.FILTER(),
+          JoinConditionTypeCoerceRule.INSTANCE(),
+          FlinkJoinPushExpressionsRule.INSTANCE);
 
   public static final RuleSet SUB_QUERY_REWRITE_RULES =
       RuleSets.ofList(
@@ -61,9 +74,9 @@ public class BatchRuleSets {
 
           // Don't put these three reduce rules in cbo, since they prunes matched rel nodes
           // in planner and disable further optimization.
-          // CoreRules.FILTER_REDUCE_EXPRESSIONS,
-          // CoreRules.PROJECT_REDUCE_EXPRESSIONS,
-          // CoreRules.JOIN_REDUCE_EXPRESSIONS,
+          CoreRules.FILTER_REDUCE_EXPRESSIONS,
+          CoreRules.PROJECT_REDUCE_EXPRESSIONS,
+          CoreRules.JOIN_REDUCE_EXPRESSIONS,
           CoreRules.FILTER_MERGE,
           CoreRules.PROJECT_MERGE,
           CoreRules.PROJECT_REMOVE,

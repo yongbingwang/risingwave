@@ -54,7 +54,7 @@ public class SqlConverter {
     private final RisingWaveTypeFactory typeFactory = RisingWaveTypeFactory.INSTANCE;
 
     private List<String> defaultSchema = Collections.emptyList();
-    private SqlToRelConverter.Config config = SqlToRelConverter.config();
+    private SqlToRelConverter.Config config = SqlToRelConverter.config().withExpand(false);
     private VolcanoPlanner planner = null;
     private RelOptCluster cluster = null;
 

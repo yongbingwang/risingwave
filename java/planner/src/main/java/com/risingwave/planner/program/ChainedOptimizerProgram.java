@@ -65,6 +65,7 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
 
   /** OptimizerPhase in the chain */
   public enum OptimizerPhase {
+    SUBQUERY_REWRITE2("Subquery rewrite2"),
     SUBQUERY_REWRITE("Subquery rewrite"),
     LOGICAL_REWRITE("Logical rewrite"),
     JOIN_REORDER("Join reorder"),

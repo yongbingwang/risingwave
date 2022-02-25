@@ -7,6 +7,7 @@ import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPh
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_REWRITE;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.PHYSICAL;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.SUBQUERY_REWRITE;
+import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.SUBQUERY_REWRITE2;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static com.risingwave.planner.rules.physical.BatchRuleSets.DISTRIBUTED_CONVERTER_RULES;
 import static com.risingwave.planner.rules.physical.BatchRuleSets.DISTRIBUTION_RULES;
@@ -22,6 +23,7 @@ import com.risingwave.planner.program.HepOptimizerProgram;
 import com.risingwave.planner.program.JoinReorderProgram;
 import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.program.SubQueryRewriteProgram;
+import com.risingwave.planner.program.SubQueryRewriteProgram2;
 import com.risingwave.planner.program.VolcanoOptimizerProgram;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.physical.BatchPlan;
@@ -92,6 +94,7 @@ public class BatchPlanner implements Planner<BatchPlan> {
       OptimizerPhase optimizeLevel, RelCollation requiredCollation) {
     ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder(optimizeLevel);
 
+    builder.addLast(SUBQUERY_REWRITE2, new SubQueryRewriteProgram2());
     builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
 
     builder.addLast(

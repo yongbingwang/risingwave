@@ -49,6 +49,7 @@ tasks.register<JacocoReport>("applicationCodeCoverageReport") {
 }
 
 tasks.named<ShadowJar>("shadowJar") {
+    setZip64(true)
     archiveFileName.set("risingwave-fe-runnable.jar")
     destinationDirectory.set(file("build/libs/"))
     mergeServiceFiles()

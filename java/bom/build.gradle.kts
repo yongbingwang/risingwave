@@ -9,11 +9,13 @@ val annotationVersion = "1.3.2"
 var guiceVersion = "5.0.1"
 val protobufVersion = "3.17.2"
 val akkaVersion = "2.6.15"
-val scalaBinaryVersion = "2.13"
+val scalaBinaryVersion = "2.12"
+val scalaVersion = "2.12.10"
 val mockitoVersion = "3.11.2"
 var hamcrestVersion = "1.3"
 var quickcheckVersion = "1.0"
 val logbackVersion = "1.2.10"
+val flinkVersion = "1.14.3"
 
 javaPlatform {
     allowDependencies()
@@ -46,6 +48,7 @@ dependencies {
         api("org.hamcrest:hamcrest-all:$hamcrestVersion")
         api("org.apache.commons:commons-lang3:3.0")
         api("io.grpc:grpc-kotlin-stub:1.1.0")
+        api("org.scala-lang:scala-library:${scalaVersion}")
         runtime("ch.qos.logback:logback-classic:${logbackVersion}")
         runtime("org.junit.jupiter:junit-jupiter-engine:$junit5Version")
         runtime("org.junit.jupiter:junit-jupiter-params:$junit5Version")

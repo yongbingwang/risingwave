@@ -6,7 +6,7 @@ plugins {
 }
 
 // TODO: We need to figure out one way to manage all version in one place
-val scalaBinaryVersion = "2.13"
+val scalaBinaryVersion = "2.12"
 
 dependencies {
     // Get recommended versions from platform project
@@ -17,6 +17,7 @@ dependencies {
     api(project(":common"))
     api(project(":catalog"))
     api(project(":pgwire"))
+    api(project(":planner2"))
     implementation(project(":proto"))
     implementation(kotlin("stdlib-jdk8"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
@@ -27,6 +28,7 @@ dependencies {
     runtimeOnly("ch.qos.logback:logback-classic")
     api("com.google.protobuf:protobuf-java-util")
     api("org.apache.commons:commons-lang3")
+    api("org.scala-lang:scala-library")
 
     testImplementation("org.junit.jupiter:junit-jupiter-api")
     testImplementation("org.junit.jupiter:junit-jupiter-params")
@@ -61,3 +63,26 @@ tasks.spotlessJava {
     }
     dependsOn(tasks.generateGrammarSource)
 }
+
+//sourceSets {
+//    main {
+//        withConvention(ScalaSourceSet::class) {
+//            java {
+//                setSrcDirs(listOf<String>())
+//            }
+//            scala {
+//                setSrcDirs(listOf("src/main/java", "src/main/scala"))
+//            }
+//        }
+//    }
+//    test {
+//        withConvention(ScalaSourceSet::class) {
+//            java {
+//                setSrcDirs(listOf<String>())
+//            }
+//            scala {
+//                setSrcDirs(listOf("src/test/java", "src/test/scala"))
+//            }
+//        }
+//    }
+//}

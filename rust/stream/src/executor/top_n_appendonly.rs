@@ -13,7 +13,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{PkIndicesRef, StatefuleExecutor, ExecutorState};
+use super::{ExecutorState, PkIndicesRef, StatefuleExecutor};
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{Executor, Message, PkIndices, StreamChunk};
@@ -34,8 +34,8 @@ pub trait TopNExecutorBase: StatefuleExecutor {
 /// computing diffs and flushing when receiving a barrier.
 pub(super) async fn top_n_executor_next<E: TopNExecutorBase>(executor: &mut E) -> Result<Message> {
     let msg = executor.input().next().await?;
-    if let Some(epoch) = executor.try_init_executor(&msg) {
-        return msg;
+    if executor.try_init_executor(&msg).is_some() {        // Pass through the first msg directly after initializing the executor
+        return Ok(msg);
     }
     let res = match msg {
         Message::Chunk(chunk) => Ok(Message::Chunk(executor.apply_chunk(chunk).await?)),
@@ -148,7 +148,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNAppendonlyExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::new(1),
+            executor_state: ExecutorState::INIT,
         }
     }
 

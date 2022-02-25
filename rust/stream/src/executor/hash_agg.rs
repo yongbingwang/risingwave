@@ -16,7 +16,8 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::aggregation::{AggState, HashKey};
 use super::{
     agg_executor_next, agg_input_arrays, generate_agg_schema, generate_agg_state, pk_input_arrays,
-    AggCall, AggExecutor, Barrier, Executor, Message, PkIndicesRef, StatefuleExecutor, ExecutorState,
+    AggCall, AggExecutor, Barrier, Executor, ExecutorState, Message, PkIndicesRef,
+    StatefuleExecutor,
 };
 use crate::executor::PkIndices;
 
@@ -64,7 +65,7 @@ pub struct HashAggExecutor<S: StateStore> {
     op_info: String,
 
     /// Executor state
-    executor_state: ExecutorState
+    executor_state: ExecutorState,
 }
 
 impl<S: StateStore> HashAggExecutor<S> {
@@ -90,7 +91,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             pk_indices,
             identity: format!("HashAggExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::new(1),
+            executor_state: ExecutorState::INIT,
         }
     }
 

@@ -11,7 +11,7 @@ use static_assertions::const_assert_eq;
 
 use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::{Barrier, Executor, Message, PkDataTypes, ExecutorState, StatefuleExecutor};
+use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefuleExecutor};
 
 /// Hash key for [`HashAggExecutor`].
 pub type HashKey = Row;
@@ -230,9 +230,9 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
 
     loop {
         let msg = executor.input().next().await?;
-        if executor.try_init_executor(&msg) {
+        if executor.try_init_executor(&msg).is_some() {
             // Pass through the first msg directly after initializing the executor
-            return msg;
+            return Ok(msg);
         }
         match msg {
             Message::Chunk(chunk) => executor.apply_chunk(chunk).await?,

@@ -7,14 +7,13 @@ use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::{Keyspace, Segment, StateStore};
 
+use super::{ExecutorState, StatefuleExecutor};
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
 use crate::executor::{
     generate_output, top_n_executor_next, Executor, Message, PkIndices, PkIndicesRef,
     TopNExecutorBase,
 };
-
-use super::{ExecutorState, StatefuleExecutor};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -46,7 +45,7 @@ pub struct TopNExecutor<S: StateStore> {
 
     /// Logical Operator Info
     op_info: String,
-    
+
     /// Executor state
     executor_state: ExecutorState,
 }
@@ -124,7 +123,7 @@ impl<S: StateStore> TopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::new(1),
+            executor_state: ExecutorState::INIT,
         }
     }
 

@@ -9,7 +9,8 @@ use risingwave_common::error::Result;
 
 use super::{
     agg_executor_next, create_streaming_agg_state, generate_agg_schema, AggCall, AggExecutor,
-    Barrier, Executor, Message, PkIndices, PkIndicesRef, StreamingAggStateImpl, ExecutorState, StatefuleExecutor,
+    Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor,
+    StreamingAggStateImpl,
 };
 
 #[derive(Debug)]
@@ -43,7 +44,7 @@ pub struct LocalSimpleAggExecutor {
     op_info: String,
 
     /// Executor state
-    executor_state: ExecutorState
+    executor_state: ExecutorState,
 }
 
 impl LocalSimpleAggExecutor {
@@ -77,7 +78,7 @@ impl LocalSimpleAggExecutor {
             agg_calls,
             identity: format!("LocalSimpleAggExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::new(1),
+            executor_state: ExecutorState::INIT,
         })
     }
 }

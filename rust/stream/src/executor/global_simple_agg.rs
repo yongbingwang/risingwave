@@ -10,8 +10,11 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{aggregation::*, StatefuleExecutor};
-use super::{pk_input_arrays, Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef};
+use super::aggregation::*;
+use super::{
+    pk_input_arrays, Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef,
+    StatefuleExecutor,
+};
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -94,7 +97,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             agg_calls,
             identity: format!("GlobalSimpleAggExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::new(1),
+            executor_state: ExecutorState::INIT,
         }
     }
 

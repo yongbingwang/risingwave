@@ -15,7 +15,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::managed_state::join::*;
-use super::{Executor, Message, PkIndices, PkIndicesRef, StatefuleExecutor, ExecutorState};
+use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor};
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -247,10 +247,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExec
 impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S, T> {
     async fn next(&mut self) -> Result<Message> {
         let msg = self.aligner.next().await;
-        if let Some(epoch) = self.try_init_executor(&msg) {
-            self.side_l.ht.update_epoch(epoch.curr);
-            self.side_r.ht.update_epoch(epoch.curr);
-            return msg;
+        if let Some(barrier) = self.try_init_executor(&msg) {
+            self.side_l.ht.update_epoch(barrier.epoch.curr);
+            self.side_r.ht.update_epoch(barrier.epoch.curr);
+            return Ok(Message::Barrier(barrier));
         }
         match msg {
             AlignedMessage::Left(message) => match message {
@@ -266,7 +266,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
                 let epoch = barrier.epoch.curr;
                 self.side_l.ht.update_epoch(epoch);
                 self.side_r.ht.update_epoch(epoch);
-                self.update_epoch(barrier.epoch.curr);
+                self.update_executor_state(ExecutorState::ACTIVE(barrier.epoch.curr));
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -382,7 +382,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             debug_r,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::new(2),
+            executor_state: ExecutorState::INIT,
         }
     }
 

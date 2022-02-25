@@ -262,6 +262,17 @@ pub enum Message {
     Barrier(Barrier),
 }
 
+impl<'a> TryFrom<&'a Message> for &'a Barrier {
+    type Error = ();
+
+    fn try_from(m: &'a Message) -> std::result::Result<Self, Self::Error> {
+        match m {
+            Message::Chunk(_) => Err(()),
+            Message::Barrier(b) => Ok(b),
+        }
+    }
+}
+
 impl Message {
     /// Return true if the message is a stop barrier, meaning the stream
     /// will not continue, false otherwise.
@@ -342,19 +353,15 @@ pub trait Executor: Send + Debug + 'static {
 #[derive(Debug)]
 pub enum ExecutorState {
     /// Waiting for the first barrier
-    INIT((u64, u32)),
+    INIT,
     /// Can read from and write to storage
     ACTIVE(u64),
 }
 
 impl ExecutorState {
-    pub fn new(num_pending_barrier: u32) -> Self {
-        ExecutorState::INIT((INVALID_EPOCH, num_pending_barrier))
-    }
-
     pub fn epoch(&self) -> u64 {
         match self {
-            ExecutorState::INIT(_) => panic!("Executor is not active when getting the epoch"),
+            ExecutorState::INIT => panic!("Executor is not active when getting the epoch"),
             ExecutorState::ACTIVE(epoch) => *epoch,
         }
     }
@@ -369,20 +376,16 @@ pub trait StatefuleExecutor: Executor {
     /// Return:
     /// - Some(Epoch) if the executor is successfully initialized
     /// - None if the executor has been intialized
-    fn try_init_executor<E: AggExecutor>(&mut self, msg: &Message) -> Option<Epoch> {
+    fn try_init_executor<'a>(
+        &'a mut self,
+        msg: impl TryInto<&'a Barrier, Error = ()>,
+    ) -> Option<Barrier> {
         match self.executor_state() {
-            ExecutorState::INIT((epoch, num_pending_barrier)) => {
-                if let Message::Barrier(barrier) = &msg {
-                    if epoch != INVALID_EPOCH {
-                        assert_eq!(epoch, barrier.epoch.curr);
-                    }
-                    let next_state = if num_pending_barrier == 1 {
-                        ExecutorState::ACTIVE(barrier.epoch.curr)
-                    } else {
-                        ExecutorState::ACTIVE((barrier.epoch.curr, num_pending_barrier - 1))
-                    };
-                    self.update_executor_state(next_state);
-                    Some(barrier.epoch.clone())
+            ExecutorState::INIT => {
+                if let Ok(barrier) = msg.try_into() {
+                    // Move to ACTIVE state
+                    self.update_executor_state(ExecutorState::ACTIVE(barrier.epoch.curr));
+                    Some(barrier.clone())
                 } else {
                     panic!("The first message the executor receives is not a barrier");
                 }

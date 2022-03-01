@@ -3,6 +3,7 @@ use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
+use risingwave_common::error::{ErrorCode, RwError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -12,11 +13,13 @@ pub struct AwsAssumeRole {
     pub(crate) external_id: Option<String>,
 }
 
+#[derive(Clone, Debug)]
 pub struct AwsConfigInfo {
     pub(crate) stream_name: String,
     pub(crate) region: Option<String>,
     pub(crate) credentials: Option<AwsCredentials>,
     pub(crate) assume_role: Option<AwsAssumeRole>,
+    pub(crate) endpoint: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -67,5 +70,48 @@ impl AwsConfigInfo {
             .region(region)
             .credentials_provider(credentials_provider);
         Ok(config_loader.load().await)
+    }
+
+    pub fn new(
+        stream_name: String,
+        region: Option<String>,
+        endpoint: Option<String>,
+        credentials_access_key: Option<String>,
+        credential_secret_key: Option<String>,
+        credential_session_token: Option<String>,
+        assume_role_arn: Option<String>,
+        assume_role_external_id: Option<String>,
+    ) -> Result<Self, RwError> {
+        let mut credentials: Option<AwsCredentials> = None;
+        let mut assume_role: Option<AwsAssumeRole> = None;
+        if credentials_access_key.is_some() ^ credential_secret_key.is_some() {
+            return Err(RwError::from(ErrorCode::ProtocolError(
+                "Both AWS access key and AWS secret key should be provided.".to_string(),
+            )));
+        } else {
+            if let (Some(access_key), Some(secret_key)) =
+                (credentials_access_key, credential_secret_key)
+            {
+                credentials = Some(AwsCredentials {
+                    access_key_id: access_key,
+                    secret_access_key: secret_key,
+                    session_token: credential_session_token,
+                });
+            }
+        }
+
+        if let Some(arn) = assume_role_arn {
+            assume_role = Some(AwsAssumeRole {
+                arn,
+                external_id: assume_role_external_id,
+            });
+        }
+        Ok(Self {
+            stream_name,
+            region,
+            credentials,
+            assume_role,
+            endpoint,
+        })
     }
 }

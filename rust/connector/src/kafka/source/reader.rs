@@ -12,6 +12,7 @@ use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use crate::base::SourceReader;
 use crate::kafka::source::message::KafkaMessage;
 use crate::kafka::split::{KafkaOffset, KafkaSplit};
+use crate::kafka::KafkaConfig;
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -93,16 +94,15 @@ impl SourceReader for KafkaSplitReader {
 }
 
 impl KafkaSplitReader {
-    fn create_consumer(&self) -> Result<StreamConsumer<DefaultConsumerContext>> {
+    fn create_consumer(
+        &self,
+        _config: KafkaConfig,
+    ) -> Result<StreamConsumer<DefaultConsumerContext>> {
         let mut config = ClientConfig::new();
 
         config.set("topic.metadata.refresh.interval.ms", "30000");
         config.set("fetch.message.max.bytes", "134217728");
         config.set("auto.offset.reset", "earliest");
-
-        // for (k, v) in &self.properties {
-        //   config.set(k, v);
-        // }
 
         if config.get("group.id").is_none() {
             config.set(

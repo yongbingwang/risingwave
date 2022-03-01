@@ -6,6 +6,9 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::kafka::KafkaConfig;
+use risingwave_connector::kinesis::config::AwsConfigInfo;
+use risingwave_connector::ConnectorConfig;
 use risingwave_pb::plan::create_source_node::RowFormatType;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_source::parser::JSONParser;
@@ -13,15 +16,26 @@ use risingwave_source::{
     DebeziumJsonParser, HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig,
     SourceFormat, SourceManagerRef, SourceParser,
 };
+use risingwave_storage::StateStore;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
 const UPSTREAM_SOURCE_KEY: &str = "upstream.source";
 const KAFKA_SOURCE: &str = "kafka";
+const KINESIS_SOURCE: &str = "kinesis";
 
 const KAFKA_TOPIC_KEY: &str = "kafka.topic";
 const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";
+
+const KINESIS_STREAM_NAME: &str = "kinesis.stream.name";
+const KINESIS_REGION: &str = "kinesis.region";
+const KINESIS_ENDPOINT: &str = "kinesis.endpoint";
+const KINESIS_ACCESS_KEY: &str = "kinesis.credential.accesskey";
+const KINESIS_SECRET_KEY: &str = "kinesis.credential.secretkey";
+const KINESIS_SESSION_ID: &str = "kinesis.session.id";
+const KINESIS_ASSUMEROLE_ARN: &str = "kinesis.assumerole.arn";
+const KINESIS_ASSUMEROLE_EXTERNAL_ID: &str = "kinesis.assumerole.external.id";
 
 const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
 const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
@@ -29,7 +43,7 @@ const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
 pub(super) struct CreateSourceExecutor {
     table_id: TableId,
-    config: SourceConfig,
+    config: ConnectorConfig,
     format: SourceFormat,
     parser: Option<Arc<dyn SourceParser>>,
     columns: Vec<SourceColumnDesc>,
@@ -50,15 +64,27 @@ macro_rules! get_from_properties {
 }
 
 impl CreateSourceExecutor {
-    fn extract_kafka_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
-        Ok(SourceConfig::Kafka(HighLevelKafkaSourceConfig {
-            bootstrap_servers: get_from_properties!(properties, KAFKA_BOOTSTRAP_SERVERS_KEY)
+    fn extract_kafka_config(properties: &HashMap<String, String>) -> Result<ConnectorConfig> {
+        Ok(ConnectorConfig::Kafka(KafkaConfig {
+            broker_addr: get_from_properties!(properties, KAFKA_BOOTSTRAP_SERVERS_KEY)
                 .split(',')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
-            topic: get_from_properties!(properties, KAFKA_TOPIC_KEY).clone(),
-            properties: Default::default(),
         }))
+    }
+
+    fn extract_kinesis_config(properties: &HashMap<String, String>) -> Result<ConnectorConfig> {
+        let stream_name = get_from_properties!(properties, KINESIS_STREAM_NAME).clone();
+        Ok(ConnectorConfig::Kinesis(AwsConfigInfo::new(
+            stream_name,
+            properties.get(KINESIS_REGION).cloned(),
+            properties.get(KINESIS_ENDPOINT).cloned(),
+            properties.get(KINESIS_ACCESS_KEY).cloned(),
+            properties.get(KINESIS_SECRET_KEY).cloned(),
+            properties.get(KINESIS_SESSION_ID).cloned(),
+            properties.get(KINESIS_ASSUMEROLE_ARN).cloned(),
+            properties.get(KINESIS_ASSUMEROLE_EXTERNAL_ID).cloned(),
+        )))
     }
 }
 
@@ -106,6 +132,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
 
         let config = match get_from_properties!(properties, UPSTREAM_SOURCE_KEY).as_str() {
             KAFKA_SOURCE => CreateSourceExecutor::extract_kafka_config(properties),
+            KINESIS_SOURCE => CreateSourceExecutor::extract_kinesis_config(properties),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other

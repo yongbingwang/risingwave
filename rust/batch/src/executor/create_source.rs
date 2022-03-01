@@ -84,7 +84,7 @@ impl CreateSourceExecutor {
             properties.get(KINESIS_SESSION_ID).cloned(),
             properties.get(KINESIS_ASSUMEROLE_ARN).cloned(),
             properties.get(KINESIS_ASSUMEROLE_EXTERNAL_ID).cloned(),
-        )))
+        )?))
     }
 }
 

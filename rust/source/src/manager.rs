@@ -9,6 +9,8 @@ use risingwave_common::{ensure, gen_error};
 use risingwave_storage::table::ScannableTableRef;
 use risingwave_storage::TableColumnDesc;
 
+use risingwave_connector::ConnectorConfig;
+
 use crate::table_v2::TableSourceV2;
 use crate::{HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser};
 
@@ -20,7 +22,7 @@ pub trait SourceManager: Sync + Send {
         source_id: &TableId,
         format: SourceFormat,
         parser: Arc<dyn SourceParser>,
-        config: &SourceConfig,
+        config: &ConnectorConfig,
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()>;
@@ -76,7 +78,7 @@ impl SourceManager for MemSourceManager {
         source_id: &TableId,
         format: SourceFormat,
         parser: Arc<dyn SourceParser>,
-        config: &SourceConfig,
+        config: &ConnectorConfig,
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()> {

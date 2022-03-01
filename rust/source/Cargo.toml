@@ -28,6 +28,7 @@ rand = "0.8"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_connector = { path = "../connector" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
 serde-protobuf = "0.8"

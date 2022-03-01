@@ -3937,6 +3937,7 @@ dependencies = [
  "rdkafka",
  "risingwave-pb",
  "risingwave_common",
+ "risingwave_connector",
  "risingwave_storage",
  "serde",
  "serde-protobuf",

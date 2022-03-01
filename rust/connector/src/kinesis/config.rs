@@ -72,6 +72,7 @@ impl AwsConfigInfo {
         Ok(config_loader.load().await)
     }
 
+    #[warn(clippy::too_many_arguments)]
     pub fn new(
         stream_name: String,
         region: Option<String>,
@@ -88,16 +89,14 @@ impl AwsConfigInfo {
             return Err(RwError::from(ErrorCode::ProtocolError(
                 "Both AWS access key and AWS secret key should be provided.".to_string(),
             )));
-        } else {
-            if let (Some(access_key), Some(secret_key)) =
-                (credentials_access_key, credential_secret_key)
-            {
-                credentials = Some(AwsCredentials {
-                    access_key_id: access_key,
-                    secret_access_key: secret_key,
-                    session_token: credential_session_token,
-                });
-            }
+        } else if let (Some(access_key), Some(secret_key)) =
+            (credentials_access_key, credential_secret_key)
+        {
+            credentials = Some(AwsCredentials {
+                access_key_id: access_key,
+                secret_access_key: secret_key,
+                session_token: credential_session_token,
+            });
         }
 
         if let Some(arn) = assume_role_arn {

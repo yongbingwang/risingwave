@@ -10,6 +10,9 @@ pub use iter::*;
 mod index;
 mod iter;
 
+#[cfg(test)]
+mod test;
+
 pub type AtomicDocumentId = AtomicU64;
 pub type DocumentId = u64;
 pub const PK_SIZE: usize = std::mem::size_of::<DocumentId>();

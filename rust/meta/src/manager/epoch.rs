@@ -104,4 +104,10 @@ mod tests {
         }
         Ok(())
     }
+
+    #[test]
+    fn test_epoch_display() {
+        assert_eq!(format!("{}", Epoch(1)), "1");
+        assert_eq!(format!("{}", Epoch::from(1_u64)), "1");
+    }
 }

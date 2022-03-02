@@ -20,11 +20,6 @@ message SourceNode {
 }
 
 message ConnectorSplit {
-  oneof split {
-    KafkaSplit() {
-          
-  }
-  }
 }
 
 message ConnectorSourceNode {

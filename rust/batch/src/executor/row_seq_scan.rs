@@ -4,7 +4,9 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_storage::table::mview::new_adhoc_mview_table;
 use risingwave_storage::table::{ScannableTable, TableIterRef};
 
@@ -75,12 +77,26 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             .map(|column_id| ColumnId::new(*column_id))
             .collect_vec();
         let fields = seq_scan_node.fields.iter().map(Field::from).collect_vec();
+        let order_types = seq_scan_node
+            .get_order_types()
+            .iter()
+            .map(|v| ProstOrderType::from_i32(*v).unwrap())
+            .map(|v| OrderType::from_prost(&v))
+            .collect::<Vec<_>>();
+
+        let pk_column_indices = seq_scan_node
+            .pk_indices
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect::<Vec<_>>();
 
         let table = new_adhoc_mview_table(
             source.global_batch_env().state_store(),
             &table_id,
             &column_ids,
             &fields,
+            &pk_column_indices,
+            &order_types,
         );
 
         Ok(Box::new(Self::new(

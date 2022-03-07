@@ -269,12 +269,12 @@ async fn test_multi_mview_table_iter() {
 
     let mut state_1 = ManagedMViewState::new(
         keyspace_1.clone(),
-        vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)],
+        vec![ColumnId::from(2)],
         order_types.clone(),
     );
     let mut state_2 = ManagedMViewState::new(
         keyspace_2.clone(),
-        vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)],
+        vec![ColumnId::from(2)],
         order_types.clone(),
     );
 
@@ -293,19 +293,11 @@ async fn test_multi_mview_table_iter() {
 
     state_1.put(
         Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-        Row(vec![
-            Some(1_i32.into()),
-            Some(11_i32.into()),
-            Some(111_i32.into()),
-        ]),
+        Row(vec![Some(111_i32.into())]),
     );
     state_1.put(
         Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-        Row(vec![
-            Some(2_i32.into()),
-            Some(22_i32.into()),
-            Some(222_i32.into()),
-        ]),
+        Row(vec![Some(222_i32.into())]),
     );
     state_1.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
 
@@ -314,22 +306,14 @@ async fn test_multi_mview_table_iter() {
             Some("1".to_string().into()),
             Some("11".to_string().into()),
         ]),
-        Row(vec![
-            Some("1".to_string().into()),
-            Some("11".to_string().into()),
-            Some("111".to_string().into()),
-        ]),
+        Row(vec![Some("111".to_string().into())]),
     );
     state_2.put(
         Row(vec![
             Some("2".to_string().into()),
             Some("22".to_string().into()),
         ]),
-        Row(vec![
-            Some("2".to_string().into()),
-            Some("22".to_string().into()),
-            Some("222".to_string().into()),
-        ]),
+        Row(vec![Some("222".to_string().into())]),
     );
     state_2.delete(Row(vec![
         Some("2".to_string().into()),

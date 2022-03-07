@@ -3,24 +3,19 @@ package com.risingwave.planner.rel.streaming;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
+import com.risingwave.planner.rel.common.PrimaryKeyOrderTypesExtractor;
 import com.risingwave.planner.rel.logical.RwLogicalSort;
-import com.risingwave.proto.plan.OrderType;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.proto.streaming.plan.TopNNode;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelCollation;
-import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
-import org.apache.commons.lang3.SerializationException;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Stream Sort */
@@ -44,29 +39,9 @@ public class RwStreamSort extends Sort implements RisingWaveStreamingRel {
     var primaryKeyIndices =
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
 
-    var orderTypes = new ArrayList<OrderType>();
-    List<RelFieldCollation> relFieldCollations = collation.getFieldCollations();
-    HashMap<Integer, RelFieldCollation> inputIndexToCollation = new HashMap<>();
-    for (var relFieldCollation : relFieldCollations) {
-      inputIndexToCollation.put(relFieldCollation.getFieldIndex(), relFieldCollation);
-    }
-    for (var primaryKeyIndex : primaryKeyIndices) {
-      if (inputIndexToCollation.containsKey(primaryKeyIndex)) {
-        var relFieldCollation = inputIndexToCollation.get(primaryKeyIndex);
-        RelFieldCollation.Direction dir = relFieldCollation.getDirection();
-        OrderType orderType;
-        if (dir == RelFieldCollation.Direction.ASCENDING) {
-          orderType = OrderType.ASCENDING;
-        } else if (dir == RelFieldCollation.Direction.DESCENDING) {
-          orderType = OrderType.DESCENDING;
-        } else {
-          throw new SerializationException(String.format("%s direction not supported", dir));
-        }
-        orderTypes.add(orderType);
-      } else {
-        orderTypes.add(OrderType.ASCENDING);
-      }
-    }
+    var orderTypes =
+        PrimaryKeyOrderTypesExtractor.getPrimaryKeyColumnOrderTypes(
+            this.getCollation(), primaryKeyIndices);
 
     TopNNode.Builder topnBuilder = TopNNode.newBuilder();
     topnBuilder.addAllOrderTypes(orderTypes);

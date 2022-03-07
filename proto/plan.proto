@@ -59,6 +59,8 @@ message RowSeqScanNode {
   TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   repeated Field fields = 3;
+  repeated int32 pk_indices = 4;
+  repeated OrderType order_types = 5;
 }
 
 message SourceScanNode {

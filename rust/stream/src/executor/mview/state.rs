@@ -15,7 +15,7 @@ pub struct ManagedMViewState<S: StateStore> {
     keyspace: Keyspace<S>,
 
     /// Column IDs of each column in the input schema
-    column_ids: Vec<ColumnId>,
+    value_column_ids: Vec<ColumnId>,
 
     /// Ordering of primary key (for assertion)
     order_types: Vec<OrderType>,
@@ -30,13 +30,13 @@ pub struct ManagedMViewState<S: StateStore> {
 impl<S: StateStore> ManagedMViewState<S> {
     pub fn new(
         keyspace: Keyspace<S>,
-        column_ids: Vec<ColumnId>,
+        value_column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
     ) -> Self {
         // TODO(eric): refactor this later...
         Self {
             keyspace,
-            column_ids,
+            value_column_ids,
             cache: HashMap::new(),
             order_types: order_types.clone(),
             key_serializer: OrderedRowSerializer::new(order_types),
@@ -45,7 +45,7 @@ impl<S: StateStore> ManagedMViewState<S> {
 
     pub fn put(&mut self, pk: Row, value: Row) {
         assert_eq!(self.order_types.len(), pk.size());
-        assert_eq!(self.column_ids.len(), value.size());
+        assert_eq!(self.value_column_ids.len(), value.size());
 
         FlushStatus::do_insert(self.cache.entry(pk), value);
     }
@@ -64,14 +64,15 @@ impl<S: StateStore> ManagedMViewState<S> {
     // cache.
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
-        batch.reserve(self.cache.len() * self.column_ids.len());
+        batch.reserve(self.cache.len() * self.value_column_ids.len());
         let mut local = batch.prefixify(&self.keyspace);
 
         for (pk, cells) in self.cache.drain() {
             let row = cells.into_option();
             let pk_buf = serialize_pk(&pk, &self.key_serializer)?;
-            let bytes = serialize_pk_and_row(&pk_buf, &row, &self.column_ids)?;
+            let bytes = serialize_pk_and_row(&pk_buf, &row, &self.value_column_ids)?;
             for (key, value) in bytes {
+                println!("key:{:?},value:{:?}", key, value);
                 match value {
                     Some(val) => local.put(key, val),
                     None => local.delete(key),

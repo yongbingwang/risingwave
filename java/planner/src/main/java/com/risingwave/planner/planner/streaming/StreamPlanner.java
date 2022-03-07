@@ -120,22 +120,24 @@ public class StreamPlanner implements Planner<StreamingPlan> {
 
         var tableSourceNode = (RwStreamTableSource) node;
         var sourceColumnIds = source.getAllColumnIds();
-        var sourcePrimaryKeyColumnIds = source.getPrimaryKeyColumnIds();
+        var sourcePrimaryKeyColumnIndices = source.getPrimaryKeyColumnIndices();
         if (source.isAssociatedMaterializedView()) {
           // since we've ignored row_id column for associated mv, the pk should be empty
-          assert sourcePrimaryKeyColumnIds.isEmpty();
+          assert sourcePrimaryKeyColumnIndices.isEmpty();
           var rowIdColumnId = source.getRowIdColumn().getId();
           // manually put back the row_id column
           sourceColumnIds =
               Stream.concat(sourceColumnIds.stream(), Stream.of(rowIdColumnId))
                   .collect(ImmutableList.toImmutableList());
-          sourcePrimaryKeyColumnIds = ImmutableIntList.of(rowIdColumnId.getValue());
+          sourcePrimaryKeyColumnIndices = ImmutableIntList.of(rowIdColumnId.getValue());
         }
 
         var primaryKeyColumnIdsBuilder = ImmutableList.<ColumnCatalog.ColumnId>builder();
-        for (var idx : sourcePrimaryKeyColumnIds) {
+        for (var idx : sourcePrimaryKeyColumnIndices) {
           primaryKeyColumnIdsBuilder.add(sourceColumnIds.get(idx));
         }
+
+        var relCollation = ((MaterializedViewCatalog) source).getCollation();
 
         RwStreamBatchPlan batchPlan =
             new RwStreamBatchPlan(
@@ -146,7 +148,8 @@ public class StreamPlanner implements Planner<StreamingPlan> {
                 tableSourceNode.getTableId(),
                 primaryKeyColumnIdsBuilder.build(),
                 ImmutableIntList.of(),
-                tableSourceNode.getColumnIds());
+                tableSourceNode.getColumnIds(),
+                relCollation);
 
         var upstreamFieldsBuilder = ImmutableList.<Field>builder();
         if (source.isAssociatedMaterializedView()) {

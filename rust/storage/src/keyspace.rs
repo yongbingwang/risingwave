@@ -139,18 +139,17 @@ impl<S: StateStore> Keyspace<S> {
     /// The returned values are based on a snapshot corresponding to the given `epoch`
     pub async fn scan_with_start_key(
         &self,
-        start_key: Vec<u8>,
+        start_user_key: Vec<u8>,
         limit: Option<usize>,
         epoch: u64,
     ) -> Result<Vec<(Bytes, Bytes)>> {
-        assert!(
-            start_key[..self.prefix.len()] == self.prefix,
-            "{:?} does not start with prefix {:?}",
-            start_key,
-            self.prefix
-        );
+        let start_key = [self.prefix.as_slice(), start_user_key.as_slice()].concat();
         let range = start_key..next_key(self.prefix.as_slice());
-        self.store.scan(range, limit, epoch).await
+        let mut pairs = self.store.scan(range, limit, epoch).await?;
+        pairs
+            .iter_mut()
+            .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
+        Ok(pairs)
     }
 
     /// Scan from the keyspace, and then strip the prefix of this keyspace.

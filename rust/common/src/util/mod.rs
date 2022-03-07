@@ -4,6 +4,7 @@ use std::sync::Arc;
 pub use self::prost::*;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
+use crate::types::DataType;
 
 pub mod addr;
 pub mod bit_util;
@@ -52,4 +53,10 @@ where
             type_name::<T>()
         )))
     })
+}
+
+pub fn get_value_columns(pk_columns: &[usize], data_types: &[DataType]) -> Vec<usize> {
+    let mut value_columns = (0..data_types.len()).collect::<Vec<_>>();
+    value_columns.retain(|idx| !pk_columns.contains(idx) || data_types[*idx] == DataType::Decimal);
+    value_columns
 }

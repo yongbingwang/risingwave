@@ -4,6 +4,7 @@ import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
+import com.risingwave.planner.rel.common.PrimaryKeyOrderTypesExtractor;
 import com.risingwave.proto.plan.Field;
 import com.risingwave.proto.streaming.plan.BatchPlanNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
@@ -12,6 +13,7 @@ import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.hint.RelHint;
@@ -26,6 +28,7 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
   private final ImmutableList<ColumnCatalog.ColumnId> primaryKeyColumnIds;
   private final ImmutableList<ColumnCatalog.ColumnId> columnIds;
   private final ImmutableIntList primaryKeyIndices;
+  private final RelCollation relCollation;
 
   /**
    * BatchPlanNode is used for mv on mv snapshot read.
@@ -47,12 +50,14 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
       TableCatalog.TableId tableId,
       ImmutableList<ColumnCatalog.ColumnId> primaryKeyColumnIds,
       ImmutableIntList primaryKeyIndices,
-      ImmutableList<ColumnCatalog.ColumnId> columnIds) {
+      ImmutableList<ColumnCatalog.ColumnId> columnIds,
+      RelCollation relCollation) {
     super(cluster, traitSet, hints, table);
     this.tableId = tableId;
     this.primaryKeyColumnIds = primaryKeyColumnIds;
     this.primaryKeyIndices = primaryKeyIndices;
     this.columnIds = columnIds;
+    this.relCollation = relCollation;
   }
 
   public TableCatalog.TableId getTableId() {
@@ -69,6 +74,10 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
 
   public ImmutableList<ColumnCatalog.ColumnId> getColumnIds() {
     return columnIds;
+  }
+
+  public RelCollation getCollation() {
+    return relCollation;
   }
 
   /** Derive row type from table catalog */
@@ -116,6 +125,10 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
     builder.setTableRefId(Messages.getTableRefId(tableId)).addAllPkIndices(primaryKeyIndices);
     columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
     getFields().forEach(builder::addFields);
+    var orderTypes =
+        PrimaryKeyOrderTypesExtractor.getPrimaryKeyColumnOrderTypes(
+            relCollation, primaryKeyIndices);
+    builder.addAllOrderTypes(orderTypes);
     BatchPlanNode batchPlanNode = builder.build();
     return StreamNode.newBuilder()
         .setBatchPlanNode(batchPlanNode)

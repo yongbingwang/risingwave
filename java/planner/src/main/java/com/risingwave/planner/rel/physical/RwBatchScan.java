@@ -2,7 +2,9 @@ package com.risingwave.planner.rel.physical;
 
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
+import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
+import com.risingwave.planner.rel.common.PrimaryKeyOrderTypesExtractor;
 import com.risingwave.planner.rel.common.RwScan;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.proto.plan.Field;
@@ -69,6 +71,15 @@ public class RwBatchScan extends RwScan implements RisingWaveBatchPhyRel {
                   .setName(table.getColumnChecked(c).getName())
                   .build());
         });
+
+    var relCollation = ((MaterializedViewCatalog) table).getCollation();
+    var primaryKeyColumnIndices = table.getPrimaryKeyColumnIndices();
+    var orderTypes =
+        PrimaryKeyOrderTypesExtractor.getPrimaryKeyColumnOrderTypes(
+            relCollation, primaryKeyColumnIndices);
+
+    builder.addAllPkIndices(primaryKeyColumnIndices);
+    builder.addAllOrderTypes(orderTypes);
 
     return PlanNode.newBuilder()
         .setRowSeqScan(builder.build())

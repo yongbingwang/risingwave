@@ -98,6 +98,8 @@ message BatchPlanNode {
   repeated int32 pk_indices = 2;
   repeated int32 column_ids = 3;
   repeated plan.Field fields = 4;
+  // The order type of each pk column
+  repeated plan.OrderType order_types = 5;
 }
 
 message StreamNode {

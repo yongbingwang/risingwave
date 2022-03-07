@@ -4,6 +4,8 @@ use risingwave_common::array::{Op, RwError, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::try_match_expand;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::table::mview::new_adhoc_mview_table;
@@ -62,9 +64,27 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|column_id| ColumnId::new(*column_id))
             .collect_vec();
         let fields = node.fields.iter().map(Field::from).collect_vec();
+        let order_types = node
+            .get_order_types()
+            .iter()
+            .map(|v| ProstOrderType::from_i32(*v).unwrap())
+            .map(|v| OrderType::from_prost(&v))
+            .collect::<Vec<_>>();
 
-        let table =
-            new_adhoc_mview_table(params.env.state_store(), &table_id, &column_ids, &fields);
+        let pk_column_indices = node
+            .pk_indices
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect::<Vec<_>>();
+
+        let table = new_adhoc_mview_table(
+            params.env.state_store(),
+            &table_id,
+            &column_ids,
+            &fields,
+            &pk_column_indices,
+            &order_types,
+        );
 
         Ok(Box::new(BatchQueryExecutor::new(
             table.clone(),

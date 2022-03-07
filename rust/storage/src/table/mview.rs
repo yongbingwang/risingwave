@@ -7,6 +7,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
+use risingwave_common::util::get_value_columns;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
@@ -20,10 +21,18 @@ pub fn new_adhoc_mview_table(
     table_id: &TableId,
     column_ids: &[ColumnId],
     fields: &[Field],
+    pk_column_indices: &[usize],
+    order_types: &[OrderType],
 ) -> Arc<dyn ScannableTable> {
     dispatch_state_store!(state_store, state_store, {
         let keyspace = Keyspace::table_root(state_store, table_id);
-        let table = MViewTable::new_adhoc(keyspace, column_ids, fields);
+        let table = MViewTable::new_adhoc(
+            keyspace,
+            pk_column_indices.to_vec(),
+            order_types.to_vec(),
+            column_ids,
+            fields,
+        );
         Arc::new(table) as Arc<dyn ScannableTable>
     })
 }
@@ -37,10 +46,12 @@ pub struct MViewTable<S: StateStore> {
 
     column_descs: Vec<TableColumnDesc>,
 
-    // TODO(bugen): this field is redundant since table should be scan-only
-    pk_columns: Vec<usize>,
+    order_types: Vec<OrderType>,
 
-    // TODO(bugen): this field is redundant since table should be scan-only
+    pk_column_indices: Vec<usize>,
+
+    value_column_indices: Vec<usize>,
+
     sort_key_serializer: OrderedRowSerializer,
 }
 
@@ -48,7 +59,8 @@ impl<S: StateStore> std::fmt::Debug for MViewTable<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MViewTable")
             .field("schema", &self.schema)
-            .field("pk_columns", &self.pk_columns)
+            .field("pk_column_indices", &self.pk_column_indices)
+            .field("value_column_indices", &self.value_column_indices)
             .finish()
     }
 }
@@ -62,6 +74,7 @@ impl<S: StateStore> MViewTable<S> {
         pk_columns: Vec<usize>,
         order_types: Vec<OrderType>,
     ) -> Self {
+        assert_eq!(pk_columns.len(), order_types.len());
         let column_descs = schema
             .fields()
             .iter()
@@ -73,37 +86,71 @@ impl<S: StateStore> MViewTable<S> {
             })
             .collect_vec();
 
+        let value_columns = get_value_columns(&pk_columns, &schema.data_types());
+
         Self {
             keyspace,
             schema,
             column_descs,
-            pk_columns,
+            order_types: order_types.clone(),
+            pk_column_indices: pk_columns,
+            value_column_indices: value_columns,
             sort_key_serializer: OrderedRowSerializer::new(order_types),
         }
     }
 
     /// Create an "adhoc" [`MViewTable`] with specified columns.
     // TODO: remove this and refactor into `RowTable`.
-    pub fn new_adhoc(keyspace: Keyspace<S>, column_ids: &[ColumnId], fields: &[Field]) -> Self {
+    pub fn new_adhoc(
+        keyspace: Keyspace<S>,
+        pk_column_indices: Vec<usize>,
+        order_types: Vec<OrderType>,
+        column_ids: &[ColumnId],
+        fields: &[Field],
+    ) -> Self {
+        assert_eq!(pk_column_indices.len(), order_types.len());
         let schema = Schema::new(fields.to_vec());
         let column_descs = column_ids
             .iter()
             .zip_eq(fields.iter())
             .map(|(column_id, field)| TableColumnDesc::unnamed(*column_id, field.data_type.clone()))
             .collect();
+        let value_column_indices = get_value_columns(&pk_column_indices, &schema.data_types());
 
         Self {
             keyspace,
             schema,
             column_descs,
-            pk_columns: vec![],
-            sort_key_serializer: OrderedRowSerializer::new(vec![]),
+            order_types: order_types.clone(),
+            pk_column_indices,
+            value_column_indices,
+            sort_key_serializer: OrderedRowSerializer::new(order_types),
         }
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
-        MViewTableIter::new(self.keyspace.clone(), self.column_descs.clone(), epoch).await
+        let pk_data_types = self
+            .pk_column_indices
+            .iter()
+            .map(|idx| self.schema.data_types()[*idx].clone())
+            .collect::<Vec<_>>();
+
+        println!(
+            "iter pk_data_types:{:?},order_types:{:?}",
+            pk_data_types, self.order_types
+        );
+
+        let ordered_row_deserializer =
+            OrderedRowDeserializer::new(pk_data_types, self.order_types.clone());
+        MViewTableIter::new(
+            self.keyspace.clone(),
+            self.column_descs.clone(),
+            self.value_column_indices.clone(),
+            ordered_row_deserializer,
+            epoch,
+        )
+        .await
     }
 
     // TODO(MrCroxx): More interfaces are needed besides cell get.
@@ -117,7 +164,7 @@ impl<S: StateStore> MViewTable<S> {
         epoch: u64,
     ) -> Result<Option<Datum>> {
         assert!(
-            !self.pk_columns.is_empty(),
+            !self.pk_column_indices.is_empty(),
             "this table is adhoc and there's no pk information"
         );
 
@@ -164,6 +211,10 @@ pub struct MViewTableIter<S: StateStore> {
     epoch: u64,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
+    /// Ordered row deserializer
+    ordered_row_deserializer: OrderedRowDeserializer,
+    /// Value column indices
+    value_columns: Vec<usize>,
 }
 
 impl<'a, S: StateStore> MViewTableIter<S> {
@@ -173,11 +224,18 @@ impl<'a, S: StateStore> MViewTableIter<S> {
     async fn new(
         keyspace: Keyspace<S>,
         table_descs: Vec<TableColumnDesc>,
+        value_columns: Vec<usize>,
+        ordered_row_deserializer: OrderedRowDeserializer,
         epoch: u64,
     ) -> Result<Self> {
         keyspace.state_store().wait_epoch(epoch).await;
 
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
+        let value_descs = value_columns
+            .iter()
+            .map(|idx| table_descs[*idx].clone())
+            .collect::<Vec<_>>();
+
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(value_descs);
 
         let iter = Self {
             keyspace,
@@ -187,6 +245,8 @@ impl<'a, S: StateStore> MViewTableIter<S> {
             err_msg: None,
             epoch,
             cell_based_row_deserializer,
+            ordered_row_deserializer,
+            value_columns,
         };
         Ok(iter)
     }
@@ -197,7 +257,7 @@ impl<'a, S: StateStore> MViewTableIter<S> {
         if self.buf.is_empty() {
             self.buf = self
                 .keyspace
-                .scan(Some(Self::SCAN_LIMIT), self.epoch)
+                .scan_strip_prefix(Some(Self::SCAN_LIMIT), self.epoch)
                 .await?;
         } else {
             let last_key = self.buf.last().unwrap().0.clone();
@@ -214,6 +274,25 @@ impl<'a, S: StateStore> MViewTableIter<S> {
         self.next_idx = 0;
 
         Ok(())
+    }
+
+    fn compose_pk_and_value_as_one_row(&self, mut pk_row: Row, mut value_row: Row) -> Row {
+        println!("pk_row:{:?},value_row:{:?}", pk_row, value_row);
+        let mut pk_row_idx = 0;
+        let mut value_row_idx = 0;
+        let mut complete_row_data = vec![];
+        while value_row_idx < value_row.0.len() || pk_row_idx < pk_row.0.len() {
+            if value_row_idx < value_row.0.len()
+                && complete_row_data.len() == self.value_columns[value_row_idx]
+            {
+                complete_row_data.push(std::mem::take(value_row.0.get_mut(value_row_idx).unwrap()));
+                value_row_idx += 1;
+            } else {
+                complete_row_data.push(std::mem::take(pk_row.0.get_mut(pk_row_idx).unwrap()));
+                pk_row_idx += 1;
+            }
+        }
+        Row(complete_row_data)
     }
 }
 
@@ -236,9 +315,21 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                     if let Some(item) = self.buf.first() {
                         item
                     } else {
-                        let pk_and_row = self.cell_based_row_deserializer.take();
                         self.done = true;
-                        return Ok(pk_and_row.map(|(_pk, row)| row));
+                        let pk_and_row = self.cell_based_row_deserializer.take();
+                        return match pk_and_row {
+                            Some(_) => {
+                                let (pk, value_row) = pk_and_row.unwrap();
+                                println!("pk:{:?},value_row:{:?}", pk, value_row);
+                                assert_eq!(value_row.0.len(), self.value_columns.len());
+                                let pk_row =
+                                    self.ordered_row_deserializer.deserialize(&pk)?.into_row();
+                                Ok(Some(
+                                    self.compose_pk_and_value_as_one_row(pk_row, value_row),
+                                ))
+                            }
+                            None => Ok(None),
+                        };
                     }
                 }
             };
@@ -249,15 +340,18 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 bytes::Bytes::copy_from_slice(value)
             );
 
-            // there is no need to deserialize pk in mview
-            if key.len() < self.keyspace.key().len() + 4 {
-                return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
-            }
-
             let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value)?;
             self.next_idx += 1;
             match pk_and_row {
-                Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
+                Some(_) => {
+                    let (pk, value_row) = pk_and_row.unwrap();
+                    println!("pk:{:?},value_row:{:?}", pk, value_row);
+                    assert_eq!(value_row.0.len(), self.value_columns.len());
+                    let pk_row = self.ordered_row_deserializer.deserialize(&pk)?.into_row();
+                    return Ok(Some(
+                        self.compose_pk_and_value_as_one_row(pk_row, value_row),
+                    ));
+                }
                 None => {}
             }
         }

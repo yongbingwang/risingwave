@@ -25,14 +25,18 @@ async fn test_row_seq_scan() -> Result<()> {
         Field::unnamed(DataType::Int32),
         Field::unnamed(DataType::Int64),
     ]);
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let value_column_ids = vec![ColumnId::from(1), ColumnId::from(2)];
+    let pk_indices = vec![0];
+    let order_types = vec![OrderType::Ascending];
 
-    let mut state =
-        ManagedMViewState::new(keyspace.clone(), column_ids, vec![OrderType::Ascending]);
+    let mut state = ManagedMViewState::new(keyspace.clone(), value_column_ids, order_types.clone());
 
+    let all_column_ids = [ColumnId::from(0), ColumnId::from(1)];
     let table = Arc::new(MViewTable::new_adhoc(
         keyspace.clone(),
-        &[ColumnId::from(0), ColumnId::from(1)],
+        pk_indices,
+        order_types,
+        &all_column_ids,
         &schema.fields().iter().take(2).cloned().collect_vec(),
     ));
 
@@ -42,19 +46,11 @@ async fn test_row_seq_scan() -> Result<()> {
     let epoch: u64 = 0;
     state.put(
         Row(vec![Some(1_i32.into())]),
-        Row(vec![
-            Some(1_i32.into()),
-            Some(4_i32.into()),
-            Some(7_i64.into()),
-        ]),
+        Row(vec![Some(4_i32.into()), Some(7_i64.into())]),
     );
     state.put(
         Row(vec![Some(2_i32.into())]),
-        Row(vec![
-            Some(2_i32.into()),
-            Some(5_i32.into()),
-            Some(8_i64.into()),
-        ]),
+        Row(vec![Some(5_i32.into()), Some(8_i64.into())]),
     );
     state.flush(epoch).await.unwrap();
 

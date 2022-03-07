@@ -4,6 +4,7 @@ use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::try_match_expand;
+use risingwave_common::util::get_value_columns;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -23,6 +24,11 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     /// Columns of primary keys
     pk_columns: Vec<usize>,
+
+    /// Columns of values, notice that we store this field as it is not `all_columns` -
+    /// `pk_columns` For scalar whose key encoding different from value encoding, we need to
+    /// store them in value again.
+    value_columns: Vec<usize>,
 
     /// Identity string
     identity: String,
@@ -76,12 +82,18 @@ impl<S: StateStore> MaterializeExecutor<S> {
         executor_id: u64,
         op_info: String,
     ) -> Self {
-        let pk_columns = keys.iter().map(|k| k.column_idx).collect();
+        let pk_columns = keys.iter().map(|k| k.column_idx).collect::<Vec<_>>();
         let pk_order_types = keys.iter().map(|k| k.order_type).collect();
+        let value_columns = get_value_columns(&pk_columns, &input.schema().data_types());
+        let column_ids = value_columns
+            .iter()
+            .map(|idx| column_ids[*idx])
+            .collect::<Vec<_>>();
         Self {
             input,
             local_state: ManagedMViewState::new(keyspace, column_ids, pk_order_types),
             pk_columns,
+            value_columns,
             identity: format!("MaterializeExecutor {:X}", executor_id),
             op_info,
         }
@@ -160,10 +172,10 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
                 .collect_vec());
 
             // assemble row
-            let row = Row(chunk
-                .columns()
+            let row = Row(self
+                .value_columns
                 .iter()
-                .map(|x| x.array_ref().datum_at(idx))
+                .map(|col_idx| chunk.column_at(*col_idx).array_ref().datum_at(idx))
                 .collect_vec());
 
             match op {
@@ -266,7 +278,8 @@ mod tests {
             ],
         );
 
-        let _table = new_adhoc_mview_table(store, &table_id, &column_ids, schema.fields());
+        let _table =
+            new_adhoc_mview_table(store, &table_id, &column_ids, schema.fields(), &[], &[]);
 
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),

@@ -168,12 +168,16 @@ async fn test_table_v2_materialize() -> Result<()> {
         Ok::<_, RwError>(())
     });
 
+    let pk_column_indices = vec![];
+    let order_types = vec![];
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = new_adhoc_mview_table(
         store.clone(),
         &source_table_id,
         &all_column_ids,
         all_schema.fields(),
+        &pk_column_indices,
+        &order_types,
     );
 
     let mut scan = RowSeqScanExecutor::new(

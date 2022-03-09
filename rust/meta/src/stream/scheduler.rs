@@ -24,10 +24,7 @@ pub enum ScheduleCategory {
 }
 
 /// [`Scheduler`] defines schedule logic for mv actors.
-pub struct Scheduler<S>
-where
-    S: MetaStore,
-{
+pub struct Scheduler<S> {
     cluster_manager: Arc<StoredClusterManager<S>>,
     category: ScheduleCategory,
 }

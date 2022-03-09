@@ -130,8 +130,6 @@ impl ScheduledBarriers {
 /// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
 /// manager transactionally using [`Command`].
 pub struct BarrierManager<S>
-where
-    S: MetaStore,
 {
     cluster_manager: StoredClusterManagerRef<S>,
 

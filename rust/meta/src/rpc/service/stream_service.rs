@@ -13,7 +13,7 @@ use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
 
-pub type TonicResponse<T> = Result<Response<T>, Status>;
+type TonicResponse<T> = Result<Response<T>, Status>;
 
 #[derive(Clone)]
 pub struct StreamServiceImpl<S>

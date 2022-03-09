@@ -11,10 +11,7 @@ use crate::storage::MetaStore;
 /// [`MetaSrcEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
 #[derive(Clone)]
-pub struct MetaSrvEnv<S>
-where
-    S: MetaStore,
-{
+pub struct MetaSrvEnv<S> {
     /// id generator manager.
     id_gen_manager: IdGeneratorManagerRef<S>,
     /// meta store.

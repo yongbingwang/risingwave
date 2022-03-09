@@ -30,10 +30,7 @@ pub struct CreateMaterializedViewContext {
     pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
 }
 
-pub struct StreamManager<S>
-where
-    S: MetaStore,
-{
+pub struct StreamManager<S> {
     fragment_manager_ref: FragmentManagerRef<S>,
 
     barrier_manager_ref: BarrierManagerRef<S>,

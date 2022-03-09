@@ -241,3 +241,32 @@ message SubscribeResponse {
 service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 }
+
+message DdlV2CreateTableRequest {
+  repeated plan.ColumnDesc column_descs = 1;
+  plan.TableSourceInfo source_info = 2;
+  stream_plan.StreamNode materialize_plan = 3;
+  plan.MaterializedViewInfo mv_info = 4;
+}
+
+message DdlV2CreateMaterializedSourceRequest {
+  repeated plan.ColumnDesc column_descs = 1;
+  plan.StreamSourceInfo source_info = 2;
+  stream_plan.StreamNode materialize_plan = 3;
+  plan.MaterializedViewInfo mv_info = 4;
+}
+
+message DdlV2CreateSourceRequest {
+  repeated plan.ColumnDesc column_descs = 1;
+  plan.StreamSourceInfo source_info = 2;
+}
+
+message DdlV2Response {
+  common.Status status = 1;
+}
+
+service DdlV2Service {
+  rpc CreateTable(DdlV2CreateTableRequest) returns (DdlV2Response);
+  rpc CreateMaterializedSource(DdlV2CreateMaterializedSourceRequest) returns (DdlV2Response);
+  rpc CreateSource(DdlV2CreateSourceRequest) returns (DdlV2Response);
+}

@@ -39,7 +39,7 @@ message ColumnDesc {
 
 message ColumnCatalog {
   ColumnDesc column_desc = 1;
-  bool is_hidden = 4;
+  bool is_hidden = 2;
 }
 
 message StreamSourceInfo {

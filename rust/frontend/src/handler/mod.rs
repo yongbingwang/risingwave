@@ -1,9 +1,10 @@
 use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{ObjectName, Query, Statement};
 
 use crate::session::{QueryContext, SessionImpl};
 
+mod create_mv;
 mod create_source;
 pub mod create_table;
 pub mod drop_table;
@@ -22,6 +23,22 @@ pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgR
         Statement::Drop(drop_statement) => {
             let table_object_name = ObjectName(vec![drop_statement.name]);
             drop_table::handle_drop_table(context, table_object_name).await
+        }
+        Statement::CreateView {
+            materialized,
+            /// View name
+            name,
+            query,
+            ..
+        } => {
+            if materialized {
+                create_mv::handle_create_materialized_view(context, name, query).await
+            } else {
+                Err(
+                    ErrorCode::NotImplementedError("CREATE VIEW is not yet supported".to_string())
+                        .into(),
+                )
+            }
         }
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
     }

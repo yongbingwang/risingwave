@@ -27,8 +27,6 @@ pub struct StreamServiceImpl<S>
     fragment_manager_ref: FragmentManagerRef<S>,
     cluster_manager: Arc<StoredClusterManager<S>>,
 
-    source_manager_ref: SourceManagerRef<S>,
-
     #[allow(dead_code)]
     epoch_generator: EpochGeneratorRef,
 }
@@ -49,7 +47,6 @@ impl<S> StreamServiceImpl<S>
             fragment_manager_ref,
             id_gen_manager_ref: env.id_gen_manager_ref(),
             cluster_manager,
-            source_manager_ref,
             epoch_generator: env.epoch_generator_ref(),
         }
     }
@@ -110,34 +107,6 @@ impl<S> StreamManagerService for StreamServiceImpl<S>
         }
     }
 
-    async fn create_source(
-        &self,
-        _request: Request<CreateSourceRequest>,
-    ) -> TonicResponse<CreateSourceResponse> {
-        let req = _request.into_inner();
-
-        match self.source_manager_ref.create_source(CreateSourceContext {
-            table_id: Default::default(),
-            discovery_new_split: true,
-            properties: req.properties.clone(),
-        }).await {
-            Ok(()) => Ok(Response::new(CreateSourceResponse { status: None })),
-            Err(e) => Err(e.to_grpc_status()),
-        }
-    }
-
-    async fn drop_source(
-        &self,
-        _request: Request<DropSourceRequest>,
-    ) -> TonicResponse<DropSourceResponse> {
-        let req = _request.into_inner();
-        let table_id = req.get_table_ref_id().map_err(tonic_err)?;
-
-        match self.source_manager_ref.drop_source(DropSourceContext { table_id: table_id.clone() }).await {
-            Ok(()) => Ok(Response::new(DropSourceResponse { status: None })),
-            Err(e) => Err(e.to_grpc_status()),
-        }
-    }
 
     #[cfg(not(tarpaulin_include))]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {

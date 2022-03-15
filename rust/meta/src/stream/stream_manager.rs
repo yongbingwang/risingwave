@@ -18,7 +18,7 @@ use crate::cluster::{NodeId, StoredClusterManager};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler};
+use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler, SourceManagerRef};
 
 pub type StreamManagerRef<S> = Arc<StreamManager<S>>;
 
@@ -33,8 +33,8 @@ pub struct CreateMaterializedViewContext {
 
 /// Stream Manager
 pub struct StreamManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     /// Manages definition and status of fragments and actors
     fragment_manager_ref: FragmentManagerRef<S>,
@@ -50,8 +50,8 @@ where
 }
 
 impl<S> StreamManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -407,7 +407,7 @@ mod tests {
                     notification_manager,
                     Duration::from_secs(3600),
                 )
-                .await?,
+                    .await?,
             );
             let host = HostAddress {
                 host: host.to_string(),
@@ -437,7 +437,7 @@ mod tests {
                 barrier_manager_ref.clone(),
                 cluster_manager.clone(),
             )
-            .await?;
+                .await?;
 
             // TODO: join barrier service back to local thread
             tokio::spawn(async move { barrier_manager_ref.run().await.unwrap() });

@@ -168,7 +168,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let stream_srv = StreamServiceImpl::<S>::new(
         stream_manager_ref,
         fragment_manager.clone(),
-        cluster_manager,
+        cluster_manager.clone(),
         source_manager_ref,
         env,
     );
@@ -183,7 +183,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock::start_compaction_trigger(hummock_manager, compactor_manager),
         #[cfg(not(test))]
         StoredClusterManager::start_heartbeat_checker(
-            cluster_manager.clone(),
+            cluster_manager,
             Duration::from_secs(1),
         )
         .await,

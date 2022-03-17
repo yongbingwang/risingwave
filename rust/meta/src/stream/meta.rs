@@ -11,7 +11,7 @@ use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
 
-use crate::cluster::NodeId;
+use crate::cluster::WorkerId;
 use crate::model::{ActorId, MetadataModel, TableFragments};
 use crate::storage::MetaStore;
 
@@ -24,10 +24,10 @@ pub struct FragmentManager<S> {
 
 pub struct ActorInfos {
     /// node_id => actor_ids
-    pub actor_maps: HashMap<NodeId, Vec<ActorId>>,
+    pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
     /// all reachable source actors
-    pub source_actor_maps: HashMap<NodeId, Vec<ActorId>>,
+    pub source_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 }
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
@@ -145,7 +145,7 @@ where
         }
     }
 
-    pub fn all_node_actors(&self) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
+    pub fn all_node_actors(&self) -> Result<HashMap<WorkerId, Vec<StreamActor>>> {
         let mut actor_maps = HashMap::new();
         for entry in &self.table_fragments {
             for (node_id, actor_ids) in &entry.value().node_actors() {
@@ -156,7 +156,10 @@ where
         Ok(actor_maps)
     }
 
-    pub fn table_node_actors(&self, table_id: &TableId) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
+    pub fn table_node_actors(
+        &self,
+        table_id: &TableId,
+    ) -> Result<BTreeMap<WorkerId, Vec<ActorId>>> {
         match self.table_fragments.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
             None => Err(RwError::from(InternalError(

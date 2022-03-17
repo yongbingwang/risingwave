@@ -17,7 +17,7 @@ use uuid::Uuid;
 pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
-use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
+use crate::cluster::{ClusterManager, ClusterManagerRef};
 use crate::hummock::HummockManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH};
 use crate::rpc::metrics::MetaMetrics;
@@ -141,7 +141,7 @@ pub struct BarrierManager<S>
 where
     S: MetaStore,
 {
-    cluster_manager: StoredClusterManagerRef<S>,
+    cluster_manager: ClusterManagerRef<S>,
 
     fragment_manager: FragmentManagerRef<S>,
 
@@ -168,7 +168,7 @@ where
     /// Create a new [`BarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
-        cluster_manager: Arc<StoredClusterManager<S>>,
+        cluster_manager: Arc<ClusterManager<S>>,
         fragment_manager: FragmentManagerRef<S>,
         epoch_generator: EpochGeneratorRef,
         hummock_manager: Arc<HummockManager<S>>,
@@ -204,7 +204,7 @@ where
             let info = {
                 let all_nodes = self
                     .cluster_manager
-                    .list_worker_node(WorkerType::ComputeNode, Some(Running))
+                    .list_worker(WorkerType::ComputeNode, Some(Running))
                     .await;
                 let all_actor_infos = self
                     .fragment_manager

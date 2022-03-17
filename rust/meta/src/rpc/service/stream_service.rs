@@ -6,7 +6,7 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::StoredClusterManager;
+use crate::cluster::ClusterManager;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -23,7 +23,7 @@ where
 
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     fragment_manager_ref: FragmentManagerRef<S>,
-    cluster_manager: Arc<StoredClusterManager<S>>,
+    cluster_manager: Arc<ClusterManager<S>>,
 
     #[allow(dead_code)]
     epoch_generator: EpochGeneratorRef,
@@ -36,7 +36,7 @@ where
     pub fn new(
         sm: StreamManagerRef<S>,
         fragment_manager_ref: FragmentManagerRef<S>,
-        cluster_manager: Arc<StoredClusterManager<S>>,
+        cluster_manager: Arc<ClusterManager<S>>,
         env: MetaSrvEnv<S>,
     ) -> Self {
         StreamServiceImpl {

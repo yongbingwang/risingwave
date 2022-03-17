@@ -9,13 +9,13 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use tonic::transport::{Channel, Endpoint};
 
-use crate::cluster::NodeId;
+use crate::cluster::WorkerId;
 
 /// [`StreamClients`] maintains stream service clients to known compute nodes.
 #[derive(Default)]
 pub struct StreamClients {
     /// Stores the [`StreamServiceClient`] mapping: `node_id` => client.
-    clients: DashMap<NodeId, StreamServiceClient<Channel>>,
+    clients: DashMap<WorkerId, StreamServiceClient<Channel>>,
 }
 
 impl StreamClients {
@@ -42,7 +42,7 @@ impl StreamClients {
         Ok(client)
     }
 
-    pub fn get_by_node_id(&self, node_id: &NodeId) -> Option<StreamServiceClient<Channel>> {
+    pub fn get_by_node_id(&self, node_id: &WorkerId) -> Option<StreamServiceClient<Channel>> {
         self.clients.get(node_id).map(|client| client.to_owned())
     }
 }

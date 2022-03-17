@@ -7,7 +7,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::Fragment;
 
-use crate::cluster::{NodeId, NodeLocations, StoredClusterManager};
+use crate::cluster::{ClusterManager, WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
@@ -16,7 +16,7 @@ pub struct Scheduler<S>
 where
     S: MetaStore,
 {
-    cluster_manager: Arc<StoredClusterManager<S>>,
+    cluster_manager: Arc<ClusterManager<S>>,
     /// Round robin counter for singleton fragments
     single_rr: AtomicUsize,
 }
@@ -25,7 +25,7 @@ pub struct ScheduledLocations {
     /// actor location map.
     pub actor_locations: BTreeMap<ActorId, ParallelUnit>,
     /// worker location map.
-    pub node_locations: NodeLocations,
+    pub node_locations: WorkerLocations,
 }
 
 impl ScheduledLocations {
@@ -37,7 +37,7 @@ impl ScheduledLocations {
     }
 
     /// [`node_actors`] returns all actors for every node.
-    pub fn node_actors(&self) -> HashMap<NodeId, Vec<ActorId>> {
+    pub fn node_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
         let mut node_actors = HashMap::new();
         self.actor_locations
             .iter()
@@ -87,7 +87,7 @@ impl<S> Scheduler<S>
 where
     S: MetaStore,
 {
-    pub fn new(cluster_manager: Arc<StoredClusterManager<S>>) -> Self {
+    pub fn new(cluster_manager: Arc<ClusterManager<S>>) -> Self {
         Self {
             cluster_manager,
             single_rr: AtomicUsize::new(0),
@@ -160,7 +160,7 @@ mod test {
         let env = MetaSrvEnv::for_test().await;
         let notification_manager = Arc::new(NotificationManager::new());
         let cluster_manager = Arc::new(
-            StoredClusterManager::new(
+            ClusterManager::new(
                 env.clone(),
                 None,
                 notification_manager,
@@ -176,9 +176,9 @@ mod test {
                 port: i as i32,
             };
             cluster_manager
-                .add_worker_node(host.clone(), WorkerType::ComputeNode)
+                .add_worker(host.clone(), WorkerType::ComputeNode)
                 .await?;
-            cluster_manager.activate_worker_node(host).await?;
+            cluster_manager.activate_worker(host).await?;
         }
 
         let scheduler = Scheduler::new(cluster_manager);

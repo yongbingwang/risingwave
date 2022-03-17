@@ -10,7 +10,7 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::cluster::StoredClusterManager;
+use crate::cluster::ClusterManager;
 use crate::storage::MetaStore;
 
 #[derive(Clone)]
@@ -18,14 +18,14 @@ pub struct ClusterServiceImpl<S>
 where
     S: MetaStore,
 {
-    scm: Arc<StoredClusterManager<S>>,
+    scm: Arc<ClusterManager<S>>,
 }
 
 impl<S> ClusterServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(scm: Arc<StoredClusterManager<S>>) -> Self {
+    pub fn new(scm: Arc<ClusterManager<S>>) -> Self {
         ClusterServiceImpl { scm }
     }
 }
@@ -45,7 +45,7 @@ where
             .map_err(|e| e.to_grpc_status())?;
         let (worker_node, _added) = self
             .scm
-            .add_worker_node(host, worker_type)
+            .add_worker(host, worker_type)
             .await
             .map_err(|e| e.to_grpc_status())?;
         Ok(Response::new(AddWorkerNodeResponse {
@@ -62,7 +62,7 @@ where
         let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")
             .map_err(|e| e.to_grpc_status())?;
         self.scm
-            .activate_worker_node(host)
+            .activate_worker(host)
             .await
             .map_err(|e| e.to_grpc_status())?;
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
@@ -76,7 +76,7 @@ where
         let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")
             .map_err(|e| e.to_grpc_status())?;
         self.scm
-            .delete_worker_node(host)
+            .delete_worker(host)
             .await
             .map_err(|e| e.to_grpc_status())?;
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
@@ -93,7 +93,7 @@ where
         } else {
             Some(risingwave_pb::common::worker_node::State::Running)
         };
-        let node_list = self.scm.list_worker_node(worker_type, worker_state).await;
+        let node_list = self.scm.list_worker(worker_type, worker_state).await;
         Ok(Response::new(ListAllNodesResponse {
             status: None,
             nodes: node_list,

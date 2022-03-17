@@ -13,7 +13,7 @@ use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 
-use crate::cluster::StoredClusterManager;
+use crate::cluster::ClusterManager;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManager;
 
@@ -23,7 +23,7 @@ where
     S: MetaStore,
 {
     pub dashboard_addr: SocketAddr,
-    pub cluster_manager: Arc<StoredClusterManager<S>>,
+    pub cluster_manager: Arc<ClusterManager<S>>,
     pub fragment_manager: Arc<FragmentManager<S>>,
 
     // TODO: replace with catalog manager.
@@ -72,7 +72,7 @@ mod handlers {
         use risingwave_pb::common::WorkerType;
         let result = srv
             .cluster_manager
-            .list_worker_node(
+            .list_worker(
                 WorkerType::from_i32(ty)
                     .ok_or_else(|| anyhow!("invalid worker type"))
                     .map_err(err)?,
@@ -105,7 +105,7 @@ mod handlers {
         let node_actors = srv.fragment_manager.all_node_actors().map_err(err)?;
         let nodes = srv
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None)
+            .list_worker(WorkerType::ComputeNode, None)
             .await;
         let actors = nodes
             .iter()
@@ -187,9 +187,9 @@ where
             port: 4567,
         };
         self.cluster_manager
-            .add_worker_node(host.clone(), WorkerType::Frontend)
+            .add_worker(host.clone(), WorkerType::Frontend)
             .await?;
-        self.cluster_manager.activate_worker_node(host).await?;
+        self.cluster_manager.activate_worker(host).await?;
 
         Ok(())
     }

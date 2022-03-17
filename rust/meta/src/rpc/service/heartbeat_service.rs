@@ -2,7 +2,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
-use crate::cluster::StoredClusterManagerRef;
+use crate::cluster::ClusterManagerRef;
 use crate::storage::MetaStore;
 
 #[derive(Clone)]
@@ -10,14 +10,14 @@ pub struct HeartbeatServiceImpl<S>
 where
     S: MetaStore,
 {
-    cluster_manager_ref: StoredClusterManagerRef<S>,
+    cluster_manager_ref: ClusterManagerRef<S>,
 }
 
 impl<S> HeartbeatServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(cluster_manager_ref: StoredClusterManagerRef<S>) -> Self {
+    pub fn new(cluster_manager_ref: ClusterManagerRef<S>) -> Self {
         HeartbeatServiceImpl {
             cluster_manager_ref,
         }

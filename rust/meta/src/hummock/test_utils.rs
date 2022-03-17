@@ -11,7 +11,7 @@ use risingwave_storage::hummock::{
     HummockEpoch, HummockSSTableId, SSTableBuilder, SSTableBuilderOptions,
 };
 
-use crate::cluster::StoredClusterManager;
+use crate::cluster::ClusterManager;
 use crate::hummock::HummockManager;
 use crate::manager::{MetaSrvEnv, NotificationManager};
 use crate::rpc::metrics::MetaMetrics;
@@ -84,7 +84,7 @@ pub async fn setup_compute_env(
 ) -> (
     MetaSrvEnv<MemStore>,
     Arc<HummockManager<MemStore>>,
-    Arc<StoredClusterManager<MemStore>>,
+    Arc<ClusterManager<MemStore>>,
     WorkerNode,
 ) {
     let env = MetaSrvEnv::for_test().await;
@@ -94,7 +94,7 @@ pub async fn setup_compute_env(
             .unwrap(),
     );
     let cluster_manager = Arc::new(
-        StoredClusterManager::new(
+        ClusterManager::new(
             env.clone(),
             Some(hummock_manager.clone()),
             Arc::new(NotificationManager::new()),
@@ -108,7 +108,7 @@ pub async fn setup_compute_env(
         port,
     };
     let (worker_node, _) = cluster_manager
-        .add_worker_node(fake_host_address, WorkerType::ComputeNode)
+        .add_worker(fake_host_address, WorkerType::ComputeNode)
         .await
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)

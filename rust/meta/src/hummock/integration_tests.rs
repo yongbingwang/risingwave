@@ -13,7 +13,7 @@ use risingwave_storage::hummock::{HummockStorage, SstableStore};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::object::InMemObjectStore;
 
-use crate::cluster::StoredClusterManager;
+use crate::cluster::ClusterManager;
 use crate::hummock::mock_hummock_meta_client::MockHummockMetaClient;
 use crate::hummock::HummockManager;
 use crate::manager::{MetaSrvEnv, NotificationManager};
@@ -28,7 +28,7 @@ async fn get_hummock_meta_client() -> MockHummockMetaClient {
             .unwrap(),
     );
     let notification_manager = Arc::new(NotificationManager::new());
-    let cluster_manager = StoredClusterManager::new(
+    let cluster_manager = ClusterManager::new(
         env,
         Some(hummock_manager.clone()),
         notification_manager,
@@ -41,11 +41,11 @@ async fn get_hummock_meta_client() -> MockHummockMetaClient {
         port: 80,
     };
     let (worker_node, _) = cluster_manager
-        .add_worker_node(fake_host_address.clone(), WorkerType::ComputeNode)
+        .add_worker(fake_host_address.clone(), WorkerType::ComputeNode)
         .await
         .unwrap();
     cluster_manager
-        .activate_worker_node(fake_host_address)
+        .activate_worker(fake_host_address)
         .await
         .unwrap();
     MockHummockMetaClient::new(hummock_manager, worker_node.id)

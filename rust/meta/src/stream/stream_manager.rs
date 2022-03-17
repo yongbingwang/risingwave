@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{NodeId, StoredClusterManagerRef};
+use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
@@ -30,7 +30,7 @@ pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.
     pub dispatches: HashMap<ActorId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
-    pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
+    pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
 }
 
 /// Stream Manager
@@ -45,7 +45,7 @@ where
     barrier_manager_ref: BarrierManagerRef<S>,
 
     /// Maintains information of the cluster
-    cluster_manager_ref: StoredClusterManagerRef<S>,
+    cluster_manager_ref: ClusterManagerRef<S>,
 
     /// Schedules streaming actors into compute nodes
     scheduler: Scheduler<S>,
@@ -62,7 +62,7 @@ where
         env: MetaSrvEnv<S>,
         fragment_manager_ref: FragmentManagerRef<S>,
         barrier_manager_ref: BarrierManagerRef<S>,
-        cluster_manager_ref: StoredClusterManagerRef<S>,
+        cluster_manager_ref: ClusterManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
             fragment_manager_ref,
@@ -85,7 +85,7 @@ where
     ) -> Result<()> {
         let nodes = self
             .cluster_manager_ref
-            .list_worker_node(
+            .list_worker(
                 WorkerType::ComputeNode,
                 Some(risingwave_pb::common::worker_node::State::Running),
             )
@@ -303,7 +303,7 @@ mod tests {
 
     use super::*;
     use crate::barrier::BarrierManager;
-    use crate::cluster::StoredClusterManager;
+    use crate::cluster::ClusterManager;
     use crate::hummock::HummockManager;
     use crate::manager::{MetaSrvEnv, NotificationManager};
     use crate::model::ActorId;
@@ -424,7 +424,7 @@ mod tests {
             let env = MetaSrvEnv::for_test().await;
             let notification_manager = Arc::new(NotificationManager::new());
             let cluster_manager = Arc::new(
-                StoredClusterManager::new(
+                ClusterManager::new(
                     env.clone(),
                     None,
                     notification_manager,
@@ -437,9 +437,9 @@ mod tests {
                 port: port as i32,
             };
             cluster_manager
-                .add_worker_node(host.clone(), WorkerType::ComputeNode)
+                .add_worker(host.clone(), WorkerType::ComputeNode)
                 .await?;
-            cluster_manager.activate_worker_node(host).await?;
+            cluster_manager.activate_worker(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());

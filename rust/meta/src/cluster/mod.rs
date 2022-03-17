@@ -24,14 +24,13 @@ use crate::manager::{
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
 
-pub type NodeId = u32;
+pub type WorkerId = u32;
 pub type ParallelUnitId = u32;
-pub type NodeLocations = HashMap<NodeId, WorkerNode>;
-pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
+pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
+pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
 
-const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
+const DEFAULT_WORK_PARALLEL_DEGREE: usize = 4;
 
-/// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 #[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
 
@@ -49,18 +48,18 @@ impl Hash for WorkerKey {
     }
 }
 
-/// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
-pub struct StoredClusterManager<S> {
+/// [`ClusterManager`] manager worker meta data in [`MetaStore`].
+pub struct ClusterManager<S> {
     meta_store_ref: Arc<S>,
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     hummock_manager_ref: Option<Arc<HummockManager<S>>>,
     dispatch_manager_ref: HashDispatchManagerRef<S>,
     max_heartbeat_interval: Duration,
     notification_manager_ref: NotificationManagerRef,
-    core: RwLock<StoredClusterManagerCore>,
+    core: RwLock<ClusterManagerCore>,
 }
 
-impl<S> StoredClusterManager<S>
+impl<S> ClusterManager<S>
 where
     S: MetaStore,
 {
@@ -71,8 +70,8 @@ where
         max_heartbeat_interval: Duration,
     ) -> Result<Self> {
         let meta_store_ref = env.meta_store_ref();
-        let core = StoredClusterManagerCore::new(meta_store_ref.clone()).await?;
-        let compute_nodes = core.list_worker_node(WorkerType::ComputeNode, None);
+        let core = ClusterManagerCore::new(meta_store_ref.clone()).await?;
+        let compute_nodes = core.list_worker(WorkerType::ComputeNode, None);
         let dispatch_manager_ref =
             Arc::new(HashDispatchManager::new(&compute_nodes, meta_store_ref.clone()).await?);
 
@@ -87,7 +86,7 @@ where
         })
     }
 
-    pub async fn add_worker_node(
+    pub async fn add_worker(
         &self,
         host_address: HostAddress,
         r#type: WorkerType,
@@ -105,7 +104,7 @@ where
                 // Generate parallel units.
                 let parallel_units = if r#type == WorkerType::ComputeNode {
                     self.generate_cn_parallel_units(
-                        DEFAULT_WORK_NODE_PARALLEL_DEGREE as usize,
+                        DEFAULT_WORK_PARALLEL_DEGREE as usize,
                         worker_id as u32,
                     )
                     .await?
@@ -134,14 +133,14 @@ where
                 worker.insert(&*self.meta_store_ref).await?;
 
                 // Update core.
-                core.add_worker_node(worker);
+                core.add_worker(worker);
 
                 Ok((worker_node, true))
             }
         }
     }
 
-    pub async fn activate_worker_node(&self, host_address: HostAddress) -> Result<()> {
+    pub async fn activate_worker(&self, host_address: HostAddress) -> Result<()> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
             Some(worker) => {
@@ -154,7 +153,7 @@ where
 
                 worker.insert(self.meta_store_ref.as_ref()).await?;
 
-                core.activate_worker_node(worker);
+                core.activate_worker(worker);
 
                 // Notify frontends of new compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
@@ -171,7 +170,7 @@ where
         }
     }
 
-    pub async fn delete_worker_node(&self, host_address: HostAddress) -> Result<()> {
+    pub async fn delete_worker(&self, host_address: HostAddress) -> Result<()> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
             Some(worker) => {
@@ -198,7 +197,7 @@ where
                 Worker::delete(&*self.meta_store_ref, &host_address).await?;
 
                 // Update core.
-                core.delete_worker_node(worker);
+                core.delete_worker(worker);
 
                 // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
@@ -250,7 +249,7 @@ where
     }
 
     pub async fn start_heartbeat_checker(
-        cluster_manager_ref: StoredClusterManagerRef<S>,
+        cluster_manager_ref: ClusterManagerRef<S>,
         check_interval: Duration,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -284,7 +283,7 @@ where
                             .await;
                         continue;
                     }
-                    match cluster_manager_ref.delete_worker_node(key.clone()).await {
+                    match cluster_manager_ref.delete_worker(key.clone()).await {
                         Ok(_) => {
                             cluster_manager_ref
                                 .notification_manager_ref
@@ -320,13 +319,13 @@ where
     /// # Arguments
     /// * `worker_type` `WorkerType` of the nodes
     /// * `worker_state` Filter by this state if it is not None.
-    pub async fn list_worker_node(
+    pub async fn list_worker(
         &self,
         worker_type: WorkerType,
         worker_state: Option<State>,
     ) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_worker_node(worker_type, worker_state)
+        core.list_worker(worker_type, worker_state)
     }
 
     pub async fn get_worker_count(&self, worker_type: Option<WorkerType>) -> usize {
@@ -359,7 +358,7 @@ where
             .id_gen_manager_ref
             .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as i32)
             .await? as usize;
-        let parallel_degree = DEFAULT_WORK_NODE_PARALLEL_DEGREE;
+        let parallel_degree = DEFAULT_WORK_PARALLEL_DEGREE;
         let mut parallel_units = Vec::with_capacity(parallel_degree);
         let single_parallel_unit = ParallelUnit {
             id: start_id as u32,
@@ -379,7 +378,7 @@ where
     }
 }
 
-pub struct StoredClusterManagerCore {
+pub struct ClusterManagerCore {
     /// Record for workers in the cluster.
     workers: HashMap<WorkerKey, Worker>,
     /// Record for parallel units of different types.
@@ -387,7 +386,7 @@ pub struct StoredClusterManagerCore {
     hash_parallel_units: Vec<ParallelUnit>,
 }
 
-impl StoredClusterManagerCore {
+impl ClusterManagerCore {
     async fn new<S>(meta_store_ref: Arc<S>) -> Result<Self>
     where
         S: MetaStore,
@@ -431,7 +430,7 @@ impl StoredClusterManagerCore {
             .map(|(_, worker)| worker.clone())
     }
 
-    fn add_worker_node(&mut self, worker: Worker) {
+    fn add_worker(&mut self, worker: Worker) {
         let worker_node = worker.to_protobuf();
         worker_node.parallel_units.iter().for_each(|parallel_unit| {
             if parallel_unit.r#type == ParallelUnitType::Single as i32 {
@@ -444,12 +443,12 @@ impl StoredClusterManagerCore {
             .insert(WorkerKey(worker_node.host.unwrap()), worker);
     }
 
-    fn activate_worker_node(&mut self, worker: Worker) {
+    fn activate_worker(&mut self, worker: Worker) {
         self.workers
             .insert(WorkerKey(worker.to_protobuf().host.unwrap()), worker);
     }
 
-    fn delete_worker_node(&mut self, worker: Worker) {
+    fn delete_worker(&mut self, worker: Worker) {
         let worker_node = worker.to_protobuf();
         worker_node.parallel_units.iter().for_each(|parallel_unit| {
             if parallel_unit.r#type == ParallelUnitType::Single as i32 {
@@ -463,11 +462,7 @@ impl StoredClusterManagerCore {
         self.workers.remove(&WorkerKey(worker_node.host.unwrap()));
     }
 
-    fn list_worker_node(
-        &self,
-        worker_type: WorkerType,
-        worker_state: Option<State>,
-    ) -> Vec<WorkerNode> {
+    fn list_worker(&self, worker_type: WorkerType, worker_state: Option<State>) -> Vec<WorkerNode> {
         self.workers
             .iter()
             .map(|(_, worker)| worker.to_protobuf())
@@ -551,7 +546,7 @@ mod tests {
         );
 
         let cluster_manager = Arc::new(
-            StoredClusterManager::new(
+            ClusterManager::new(
                 env.clone(),
                 Some(hummock_manager.clone()),
                 Arc::new(NotificationManager::new()),
@@ -569,14 +564,14 @@ mod tests {
                 port: 5000 + i as i32,
             };
             let (worker_node, _) = cluster_manager
-                .add_worker_node(fake_host_address, WorkerType::ComputeNode)
+                .add_worker(fake_host_address, WorkerType::ComputeNode)
                 .await
                 .unwrap();
             worker_nodes.push(worker_node);
         }
 
         let single_parallel_count = worker_count;
-        let hash_parallel_count = (DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1) * worker_count;
+        let hash_parallel_count = (DEFAULT_WORK_PARALLEL_DEGREE - 1) * worker_count;
         assert_cluster_manager(&cluster_manager, single_parallel_count, hash_parallel_count).await;
 
         let worker_to_delete_count = 4usize;
@@ -586,11 +581,11 @@ mod tests {
                 port: 5000 + i as i32,
             };
             cluster_manager
-                .delete_worker_node(fake_host_address)
+                .delete_worker(fake_host_address)
                 .await
                 .unwrap();
         }
-        assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1).await;
+        assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORK_PARALLEL_DEGREE - 1).await;
 
         let mapping = cluster_manager
             .dispatch_manager_ref
@@ -600,14 +595,14 @@ mod tests {
         let unique_parallel_units = HashSet::<u32>::from_iter(mapping.into_iter());
         assert_eq!(
             unique_parallel_units.len(),
-            DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1
+            DEFAULT_WORK_PARALLEL_DEGREE - 1
         );
 
         Ok(())
     }
 
     async fn assert_cluster_manager(
-        cluster_manager: &StoredClusterManager<MemStore>,
+        cluster_manager: &ClusterManager<MemStore>,
         single_parallel_count: usize,
         hash_parallel_count: usize,
     ) {
@@ -632,13 +627,13 @@ mod tests {
             port: 2,
         };
         let (_worker_node_2, _) = cluster_manager
-            .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+            .add_worker(fake_host_address_2, WorkerType::ComputeNode)
             .await
             .unwrap();
         // Two live nodes
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker(WorkerType::ComputeNode, None)
                 .await
                 .len(),
             2
@@ -662,21 +657,20 @@ mod tests {
         // started.
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker(WorkerType::ComputeNode, None)
                 .await
                 .len(),
             2
         );
 
         let (join_handle, shutdown_sender) =
-            StoredClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval)
-                .await;
+            ClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval).await;
         tokio::time::sleep(ttl * 2 + check_interval).await;
 
         // One live node left.
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker(WorkerType::ComputeNode, None)
                 .await
                 .len(),
             1

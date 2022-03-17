@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 use super::intercept::MetricsMiddlewareLayer;
 use super::service::notification_service::NotificationServiceImpl;
 use crate::barrier::BarrierManager;
-use crate::cluster::StoredClusterManager;
+use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
 use crate::manager::{MemEpochGenerator, MetaSrvEnv, NotificationManager, StoredCatalogManager};
@@ -103,7 +103,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager = Arc::new(
-        StoredClusterManager::new(
+        ClusterManager::new(
             env.clone(),
             Some(hummock_manager.clone()),
             notification_manager.clone(),
@@ -174,11 +174,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
         hummock::start_compaction_trigger(hummock_manager, compactor_manager),
         #[cfg(not(test))]
-        StoredClusterManager::start_heartbeat_checker(
-            cluster_manager.clone(),
-            Duration::from_secs(1),
-        )
-        .await,
+        ClusterManager::start_heartbeat_checker(cluster_manager.clone(), Duration::from_secs(1))
+            .await,
     ];
 
     let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel();

@@ -6,7 +6,7 @@ use clap::StructOpt;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::Session;
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_meta::cluster::StoredClusterManager;
+use risingwave_meta::cluster::ClusterManager;
 use risingwave_meta::manager::{
     MemEpochGenerator, MetaSrvEnv, NotificationManager, StoredCatalogManager,
 };
@@ -93,7 +93,7 @@ impl FrontendMockMetaClient {
         );
 
         let cluster_manager = Arc::new(
-            StoredClusterManager::new(
+            ClusterManager::new(
                 env.clone(),
                 None,
                 notification_manager.clone(),

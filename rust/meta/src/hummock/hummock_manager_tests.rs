@@ -388,7 +388,7 @@ async fn test_release_context_resource() -> Result<()> {
         port: 2,
     };
     let (worker_node_2, _) = cluster_manager
-        .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+        .add_worker(fake_host_address_2, WorkerType::ComputeNode)
         .await
         .unwrap();
     let context_id_2 = worker_node_2.id;
@@ -500,7 +500,7 @@ async fn test_context_id_validation() {
 
     // Remove the node from cluster will invalidate context id.
     cluster_manager
-        .delete_worker_node(worker_node.host.unwrap())
+        .delete_worker(worker_node.host.unwrap())
         .await
         .unwrap();
     // Invalid context id is rejected.
@@ -519,7 +519,7 @@ async fn test_hummock_manager_basic() {
         port: 2,
     };
     let (worker_node_2, _) = cluster_manager
-        .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+        .add_worker(fake_host_address_2, WorkerType::ComputeNode)
         .await
         .unwrap();
     let context_id_2 = worker_node_2.id;

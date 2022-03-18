@@ -50,6 +50,7 @@ mod aggregation;
 mod barrier_align;
 mod batch_query;
 mod chain;
+mod chain_v2;
 mod debug;
 mod dispatch;
 mod filter;

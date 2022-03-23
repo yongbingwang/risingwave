@@ -195,14 +195,7 @@ where
                 .push(actor);
 
             for up_id in dispatch_upstreams {
-                match dispatches.entry(up_id) {
-                    Entry::Occupied(mut o) => {
-                        o.get_mut().push(actor_id);
-                    }
-                    Entry::Vacant(v) => {
-                        v.insert(vec![actor_id]);
-                    }
-                }
+                dispatches.entry(up_id).or_default().push(actor_id);
             }
         }
         for actor_ids in upstream_node_actors.values_mut() {
@@ -216,11 +209,11 @@ where
     }
 
     /// Build stream actor inside, two works will be done:
-    /// 1. replace node's input with [`MergeNode`] if it is [`ExchangeNode`], and swallow
-    /// mergeNode's input.
-    /// 2. ignore root node when it's [`ExchangeNode`].
-    /// 3. replace node's [`ExchangeNode`] input with [`MergeNode`] and resolve its upstream actor
-    /// ids if it is a [`ChainNode`].
+    /// 1. replace node's input with [`Node::MergeNode`] if it is [`Node::ExchangeNode`], and
+    /// swallow mergeNode's input.
+    /// 2. ignore root node when it's [`Node::ExchangeNode`].
+    /// 3. replace node's [`Node::ExchangeNode`] input with [`Node::MergeNode`] and resolve its
+    /// upstream actor ids if it is a [`Node::ChainNode`].
     pub fn build_inner(
         &self,
         table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
@@ -266,14 +259,6 @@ where
                                 identity: "MergeExecutor".to_string(),
                             };
                             next_idx_new += 1;
-                        }
-                        Node::ChainNode(_) => {
-                            new_stream_node.input[idx] = self.resolve_chain_node(
-                                table_sink_map,
-                                dispatch_upstreams,
-                                upstream_node_actors,
-                                input,
-                            )?;
                         }
                         _ => {
                             new_stream_node.input[idx] = self.build_inner(

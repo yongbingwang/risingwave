@@ -17,7 +17,8 @@ use std::sync::Arc;
 use log::warn;
 
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_connector::{extract_split_enumerator, SourceSplit};
+use risingwave_connector::{extract_split_enumerator, SourceSplit, SplitImpl};
+use risingwave_pb::common::ParallelUnitType::Hash;
 
 use crate::barrier::BarrierManagerRef;
 use crate::model::ActorId;
@@ -55,26 +56,13 @@ impl<S> SourceManager<S>
         Ok(())
     }
 
-    async fn register_source(properties: HashMap<String, String>, actors: Vec<ActorId>) -> Result<()> {
+    async fn assign_split_to_actors(properties: HashMap<String, String>, actors: Vec<ActorId>) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
         let mut enumerator = extract_split_enumerator(&properties).to_rw_result()?;
-
-        tokio::spawn(async move {
-            loop {
-                let result = enumerator.list_splits().await;
-
-                if result.is_err() {
-                    warn!("Failed to list splits: {}", result.err().unwrap());
-                } else {}
-
-
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
+        let splits = enumerator.list_splits().await?;
+        let mut result = HashMap::with_capacity(actors.len());
+        splits.into_iter().enumerate().for_each(|i, split| {
+            result[actors[i % actors.len()]] = split
         });
-
-        Ok(())
+        Ok(result)
     }
-
-    // async fn fetch_split() -> Result<()> {
-    //
-    // }
 }

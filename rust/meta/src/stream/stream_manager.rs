@@ -35,7 +35,7 @@ use crate::cluster::{ClusterManagerRef, NodeId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, Scheduler};
+use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
@@ -66,6 +66,9 @@ pub struct GlobalStreamManager<S: MetaStore> {
 
     /// Clients to stream service on compute nodes
     clients: StreamClientsRef,
+
+    /// Manage source split discovery
+    source_manager_ref: SourceManagerRef<S>,
 }
 
 impl<S> GlobalStreamManager<S>
@@ -74,9 +77,10 @@ where
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
+        fragment_manager_ref: FragmentManagerRef<S>,
+        barrier_manager_ref: BarrierManagerRef<S>,
+        cluster_manager_ref: StoredClusterManagerRef<S>,
+        source_manager_ref: SourceManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
             fragment_manager,
@@ -84,6 +88,7 @@ where
             scheduler: Scheduler::new(cluster_manager.clone()),
             cluster_manager,
             clients: env.stream_clients_ref(),
+            source_manager_ref: source_manager_ref.clone(),
         })
     }
 

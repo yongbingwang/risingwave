@@ -18,16 +18,18 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
-use kafka::enumerator::KafkaSplitEnumerator;
+
 use serde::{Deserialize, Serialize};
+use crate::{kafka, pulsar};
+use crate::pulsar::PulsarSplitEnumerator;
+use crate::kafka::KafkaSplitEnumerator;
+
 
 pub enum SourceOffset {
     Number(i64),
     String(String),
 }
 
-use crate::pulsar::PulsarSplitEnumerator;
-use crate::{kafka, pulsar};
 
 pub trait SourceMessage {
     fn payload(&self) -> Result<Option<&[u8]>>;
@@ -61,7 +63,7 @@ pub trait SplitEnumerator {
 
 pub enum SplitEnumeratorImpl {
     Kafka(KafkaSplitEnumerator),
-    Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
+    Pulsar(PulsarSplitEnumerator),
 }
 
 pub enum SplitImpl {

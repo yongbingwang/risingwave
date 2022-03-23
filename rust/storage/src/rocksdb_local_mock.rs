@@ -14,6 +14,7 @@
 //
 #![allow(dead_code)]
 
+use std::future::Future;
 use std::ops::RangeBounds;
 
 use async_trait::async_trait;
@@ -22,6 +23,8 @@ use risingwave_common::error::Result;
 
 use super::{StateStore, StateStoreIter};
 use crate::storage_value::StorageValue;
+use crate::store::*;
+use crate::*;
 
 #[derive(Clone)]
 pub struct RocksDBStateStore {}
@@ -32,52 +35,104 @@ impl RocksDBStateStore {
     }
 }
 
-#[async_trait]
 impl StateStore for RocksDBStateStore {
     type Iter<'a> = RocksDBStateStoreIter;
+    define_state_store_associated_type!();
 
-    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<StorageValue>> {
-        unimplemented!()
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'a> {
+        async move { unimplemented!() }
     }
 
-    async fn ingest_batch(
+    fn scan<'a, R: 'a, B: 'a>(
+        &'a self,
+        key_range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Self::ScanFuture<'a, R, B>
+    where
+        R: RangeBounds<B> + Send + Clone,
+        B: AsRef<[u8]> + Send + Clone,
+    {
+        async move { unimplemented!() }
+    }
+
+    fn reverse_scan<'a, R: 'a, B: 'a>(
+        &'a self,
+        key_range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Self::ReverseScanFuture<'a, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move { unimplemented!() }
+    }
+
+    fn ingest_batch(
         &self,
         _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         _epoch: u64,
-    ) -> Result<()> {
-        unimplemented!()
+    ) -> Self::IngestBatchFuture<'_> {
+        async move { unimplemented!() }
     }
 
-    async fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        unimplemented!()
-    }
-
-    async fn replicate_batch(
+    fn replicate_batch(
         &self,
         _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         _epoch: u64,
-    ) -> Result<()> {
-        unimplemented!()
+    ) -> Self::ReplicateBatchFuture<'_> {
+        async move { unimplemented!() }
     }
 
-    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    fn iter_inner<'a, R: 'a>(&'a self, key_range: &'a R, epoch: u64) -> Self::IterInnerFuture<'_, R>
+    where
+        R: RangeBounds<&'a [u8]> + Send + Sync + Clone,
+    {
+        async move { unimplemented!() }
+    }
+
+    fn iter<'a, R: 'a, B: 'a>(&'a self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send + Clone,
+        B: AsRef<[u8]> + Send + Clone,
+    {
+        // define_iter!(self, key_range, epoch)
+        async move {
+            use std::ops::Bound;
+            let start_bound = match key_range.start_bound() {
+                Bound::Included(start) => Bound::Included(start.as_ref()),
+                Bound::Excluded(start) => Bound::Excluded(start.as_ref()),
+                Bound::Unbounded => Bound::Unbounded,
+            };
+            let end_bound = match key_range.end_bound() {
+                Bound::Included(start) => Bound::Included(start.as_ref()),
+                Bound::Excluded(start) => Bound::Excluded(start.as_ref()),
+                Bound::Unbounded => Bound::Unbounded,
+            };
+            let range = (start_bound, end_bound);
+            self.iter_inner(&range, epoch).await
+        }
+    }
+
+    fn reverse_iter<'a, R: 'a, B: 'a>(
+        &'a self,
+        key_range: R,
+        epoch: u64,
+    ) -> Self::ReverseIterFuture<'a, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        unimplemented!()
+        async move { unimplemented!() }
     }
 
-    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
-        unimplemented!()
+    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+        async move { unimplemented!() }
     }
 
-    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
-        unimplemented!()
+    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+        async move { unimplemented!() }
     }
 }
 
@@ -93,7 +148,7 @@ impl RocksDBStateStoreIter {
 impl StateStoreIter for RocksDBStateStoreIter {
     type Item = (Bytes, StorageValue);
 
-    async fn next(&'_ mut self) -> Result<Option<Self::Item>> {
+    async fn next(&mut self) -> Result<Option<Self::Item>> {
         unimplemented!()
     }
 }

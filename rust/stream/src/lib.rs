@@ -30,8 +30,6 @@
 #![feature(hash_drain_filter)]
 #![feature(drain_filter)]
 #![feature(generators)]
-#![feature(proc_macro_hygiene)]
-#![feature(stmt_expr_attributes)]
 
 #[macro_use]
 extern crate log;

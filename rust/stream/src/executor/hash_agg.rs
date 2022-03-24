@@ -492,6 +492,7 @@ mod tests {
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
+        let kind = calc_hash_key_kind(&key_data_types);
         let args = HashAggExecutorDispatcherArgs {
             input,
             agg_calls,
@@ -502,7 +503,6 @@ mod tests {
             op_info,
             key_data_types,
         };
-        let kind = calc_hash_key_kind(&key_data_types);
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }
 

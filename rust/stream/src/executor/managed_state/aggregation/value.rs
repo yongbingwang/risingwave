@@ -140,7 +140,7 @@ mod tests {
     async fn test_managed_value_state() {
         let keyspace = create_in_memory_keyspace();
         let mut managed_state =
-            ManagedValueState::new(create_test_count_state(), keyspace.clone(), Some(0))
+            ManagedValueState::new(create_test_count_state(), vec![], keyspace.clone(), Some(0))
                 .await
                 .unwrap();
         assert!(!managed_state.is_dirty());
@@ -171,9 +171,10 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state = ManagedValueState::new(create_test_count_state(), keyspace, None)
-            .await
-            .unwrap();
+        let mut managed_state =
+            ManagedValueState::new(create_test_count_state(), vec![], keyspace, None)
+                .await
+                .unwrap();
         assert_eq!(
             managed_state.get_output().await.unwrap(),
             Some(ScalarImpl::Int64(3))

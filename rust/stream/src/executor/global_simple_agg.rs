@@ -181,6 +181,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
                 &self.agg_calls,
                 &self.keyspace,
                 input_pk_data_types,
+                None,
                 epoch,
             )
             .await?;

@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::{Op, Ops};
-use risingwave_common::array::{Array, ArrayImpl};
+use risingwave_common::array::{Array, ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
@@ -77,6 +77,9 @@ where
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
 
+    /// The group keys of this aggregation state
+    group_key: Vec<Datum>,
+
     /// The sort key serializer
     serializer: ExtremeSerializer<A::OwnedItem, EXTREME_TYPE>,
 }
@@ -117,10 +120,12 @@ where
     /// after each flush.
     pub async fn new(
         keyspace: Keyspace<S>,
+        group_key: Vec<Datum>,
         data_type: DataType,
         top_n_count: Option<usize>,
         row_count: usize,
         pk_data_types: PkDataTypes,
+        group_key_data_types: Vec<DataType>,
     ) -> Result<Self> {
         // Create the internal state based on the value we get.
         Ok(Self {
@@ -128,9 +133,10 @@ where
             flush_buffer: BTreeMap::new(),
             total_count: row_count,
             keyspace,
+            group_key,
             top_n_count,
             data_type: data_type.clone(),
-            serializer: ExtremeSerializer::new(data_type, pk_data_types),
+            serializer: ExtremeSerializer::new(data_type, pk_data_types, group_key_data_types),
         })
     }
 
@@ -323,7 +329,7 @@ where
         // TODO: we can populate the cache while flushing, but that's hard.
 
         for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
-            let key_encoded = self.serializer.serialize(key, &pks)?;
+            let key_encoded = self.serializer.serialize(&self.group_key, key, &pks)?;
 
             match v.into_option() {
                 Some(v) => {
@@ -401,11 +407,13 @@ where
 }
 
 pub async fn create_streaming_extreme_state<S: StateStore>(
+    group_key: Vec<Datum>,
     agg_call: AggCall,
     keyspace: Keyspace<S>,
     row_count: usize,
     top_n_count: Option<usize>,
     pk_data_types: PkDataTypes,
+    group_key_data_types: Vec<DataType>,
 ) -> Result<Box<dyn ManagedExtremeState<S>>> {
     match &agg_call.args {
         AggArgs::Unary(x, _) => {
@@ -427,10 +435,26 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
             match (agg_call.kind, agg_call.return_type.clone()) {
                 $(
                     (AggKind::Max, $( $kind )|+) => Ok(Box::new(
-                        ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type.clone(), top_n_count, row_count, pk_data_types).await?,
+                        ManagedMaxState::<_, $array>::new(
+                            keyspace,
+                            group_key,
+                            agg_call.return_type.clone(),
+                            top_n_count,
+                            row_count,
+                            pk_data_types,
+                            group_key_data_types
+                        ).await?,
                     )),
                     (AggKind::Min, $( $kind )|+) => Ok(Box::new(
-                        ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type.clone(), top_n_count, row_count, pk_data_types).await?,
+                        ManagedMinState::<_, $array>::new(
+                            keyspace,
+                            group_key,
+                            agg_call.return_type.clone(),
+                            top_n_count,
+                            row_count,
+                            pk_data_types,
+                            group_key_data_types
+                        ).await?,
                     )),
                 )*
                 (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
@@ -470,10 +494,12 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
+            vec![],
             DataType::Int64,
             Some(5),
             0,
             PkDataTypes::new(),
+            vec![],
         )
         .await
         .unwrap();
@@ -612,10 +638,12 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace,
+            vec![],
             DataType::Int64,
             Some(5),
             row_count,
             PkDataTypes::new(),
+            vec![],
         )
         .await
         .unwrap();
@@ -653,10 +681,12 @@ mod tests {
 
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
+            vec![],
             DataType::Int64,
             Some(3),
             0,
             smallvec![DataType::Int64],
+            vec![],
         )
         .await
         .unwrap();
@@ -738,10 +768,12 @@ mod tests {
 
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
+            vec![],
             DataType::Int64,
             Some(3),
             0,
             smallvec![DataType::Int64],
+            vec![],
         )
         .await
         .unwrap();
@@ -839,10 +871,12 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
+            vec![],
             DataType::Int64,
             Some(3),
             0,
             PkDataTypes::new(),
+            vec![],
         )
         .await
         .unwrap();
@@ -918,10 +952,12 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
+            vec![],
             DataType::Int64,
             Some(3),
             0,
             PkDataTypes::new(),
+            vec![],
         )
         .await
         .unwrap();
@@ -1015,10 +1051,12 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
+            vec![],
             DataType::Int64,
             Some(3),
             0,
             PkDataTypes::new(),
+            vec![],
         )
         .await
         .unwrap();

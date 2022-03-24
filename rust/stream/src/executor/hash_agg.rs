@@ -29,6 +29,7 @@ use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::try_match_expand;
+use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
@@ -74,9 +75,12 @@ pub struct HashAggExecutor<K: HashKey, S: StateStore> {
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
 
-    /// Indices of the columns
+    /// Indices of the group key columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
+
+    /// Data types of group key columns
+    key_data_types: Vec<DataType>,
 
     /// Identity string
     identity: String,
@@ -98,6 +102,7 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     pk_indices: PkIndices,
     executor_id: u64,
     op_info: String,
+    key_data_types: Vec<DataType>,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -113,6 +118,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.pk_indices,
             args.executor_id,
             args.op_info,
+            args.key_data_types,
         ))
     }
 }
@@ -139,11 +145,11 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .try_collect()?;
         let keyspace = Keyspace::shared_executor_root(store, params.executor_id);
         let input = params.input.remove(0);
-        let keys = key_indices
+        let key_data_types = key_indices
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
-        let kind = calc_hash_key_kind(&keys);
+        let kind = calc_hash_key_kind(&key_data_types);
         let args = HashAggExecutorDispatcherArgs {
             input,
             agg_calls,
@@ -152,6 +158,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
             op_info: params.op_info,
+            key_data_types,
         };
         Ok(HashAggExecutorDispatcher::dispatch_by_kind(kind, args))
     }
@@ -166,6 +173,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         op_info: String,
+        key_data_types: Vec<DataType>,
     ) -> Self {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
@@ -181,6 +189,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             identity: format!("HashAggExecutor {:X}", executor_id),
             op_info,
             executor_state: ExecutorState::Init,
+            key_data_types,
         }
     }
 
@@ -294,6 +303,7 @@ impl<K: HashKey, S: StateStore> AggExecutor for HashAggExecutor<K, S> {
                                 &self.agg_calls,
                                 &self.keyspace,
                                 input_pk_data_types.clone(),
+                                Some(&self.key_data_types),
                                 epoch,
                             )
                             .await?,
@@ -478,7 +488,7 @@ mod tests {
         executor_id: u64,
         op_info: String,
     ) -> Box<dyn Executor> {
-        let keys = key_indices
+        let key_data_types = key_indices
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
@@ -490,8 +500,9 @@ mod tests {
             pk_indices,
             executor_id,
             op_info,
+            key_data_types,
         };
-        let kind = calc_hash_key_kind(&keys);
+        let kind = calc_hash_key_kind(&key_data_types);
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }
 

@@ -14,6 +14,7 @@
 
 use std::marker::PhantomData;
 
+use risingwave_common::array::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::{
     deserialize_datum_from, serialize_datum_into, DataType, Datum, Scalar,
@@ -24,6 +25,7 @@ use crate::executor::PkDataTypes;
 
 type ExtremePkItem = Datum;
 
+/// PK of the row where the sort key comes from
 pub type ExtremePk = SmallVec<[ExtremePkItem; 1]>;
 
 /// All possible extreme types.
@@ -39,14 +41,20 @@ pub mod variants {
 pub struct ExtremeSerializer<K: Scalar, const EXTREME_TYPE: usize> {
     pub data_type: DataType,
     pub pk_data_types: PkDataTypes,
+    pub group_key_data_types: Vec<DataType>,
     _phantom: PhantomData<K>,
 }
 
 impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
-    pub fn new(data_type: DataType, pk_data_types: PkDataTypes) -> Self {
+    pub fn new(
+        data_type: DataType,
+        pk_data_types: PkDataTypes,
+        group_key_data_types: Vec<DataType>,
+    ) -> Self {
         Self {
             data_type,
             pk_data_types,
+            group_key_data_types,
             _phantom: PhantomData,
         }
     }
@@ -62,21 +70,30 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
     /// Serialize key and `pk` (or, `row_id`s) into a sort key
     ///
     /// TODO: support `&K` instead of `K` as parameter.
-    pub fn serialize(&self, key: Option<K>, pk: &ExtremePk) -> Result<Vec<u8>> {
+    pub fn serialize(
+        &self,
+        group_key: &[Datum],
+        key: Option<K>,
+        pk: &ExtremePk,
+    ) -> Result<Vec<u8>> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serializer.set_reverse(self.is_reversed_order());
 
-        // 1. key
+        // 1. group key
+        for k in group_key {
+            serialize_datum_into(&k, &mut serializer)?;
+        }
+
+        // 2. sort key
         let key: Datum = key.map(|x| x.into());
         serialize_datum_into(&key, &mut serializer)?;
 
-        // 2. pk
+        // 3. PK of the row of sort key
         assert_eq!(pk.len(), self.pk_data_types.len(), "mismatch pk length");
         for i in pk {
             serialize_datum_into(i, &mut serializer)?;
         }
 
-        // 3. take
         let encoded_key = serializer.into_inner();
         Ok(encoded_key)
     }
@@ -90,13 +107,18 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         let mut deserializer = memcomparable::Deserializer::new(data);
         deserializer.set_reverse(self.is_reversed_order());
 
-        // 1. key
+        // 1. group key
+        for data_type in &self.group_key_data_types {
+            let _key = deserialize_datum_from(data_type, &mut deserializer)?;
+        }
+
+        // 2. sort key
         let _key = deserialize_datum_from(&self.data_type, &mut deserializer)?;
 
-        // 2. pk
+        // 3. PK of the row of sort key
         let mut pk = ExtremePk::with_capacity(self.pk_data_types.len());
-        for kind in self.pk_data_types.iter() {
-            let i = deserialize_datum_from(kind, &mut deserializer)?;
+        for data_type in &self.pk_data_types {
+            let i = deserialize_datum_from(data_type, &mut deserializer)?;
             pk.push(i);
         }
 
@@ -106,7 +128,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::OrderedF64;
+    use risingwave_common::types::{OrderedF64, ScalarRef};
     use smallvec::smallvec;
 
     use super::*;
@@ -129,12 +151,14 @@ mod tests {
             let s = ExtremeSerializer::<OrderedF64, EXTREME_TYPE>::new(
                 DataType::Float64,
                 smallvec![DataType::Int64; pk_length],
+                vec![DataType::Int64],
             );
             let pk = (0..pk_length)
                 .map(|x| (x as i64).to_scalar_value().into())
                 .collect();
             for key in key_cases {
-                let encoded_key = s.serialize(Some(key), &pk)?;
+                let encoded_key =
+                    s.serialize(&[Datum::Some(1_i64.to_scalar_value())], Some(key), &pk)?;
                 let decoded_pk = s.get_pk(&encoded_key)?;
                 assert_eq!(pk, decoded_pk);
             }

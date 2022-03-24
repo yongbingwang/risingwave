@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
+use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
@@ -33,6 +33,9 @@ pub struct ManagedValueState<S: StateStore> {
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
 
+    /// The group keys of this aggregation state
+    group_key: Vec<Datum>,
+
     /// Indicates whether this managed state is dirty. If this state is dirty, we cannot evict the
     /// state from memory.
     is_dirty: bool,
@@ -42,6 +45,7 @@ impl<S: StateStore> ManagedValueState<S> {
     /// Create a single-value managed state based on `AggCall` and `Keyspace`.
     pub async fn new(
         agg_call: AggCall,
+        group_key: Vec<Datum>,
         keyspace: Keyspace<S>,
         row_count: Option<usize>,
     ) -> Result<Self> {
@@ -72,6 +76,7 @@ impl<S: StateStore> ManagedValueState<S> {
             )?,
             is_dirty: false,
             keyspace,
+            group_key,
         })
     }
 

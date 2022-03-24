@@ -20,7 +20,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, Op, Row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::Datum;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 use static_assertions::const_assert_eq;
@@ -291,10 +291,11 @@ pub fn generate_agg_schema(
 /// Generate initial [`AggState`] from `agg_calls`. For [`HashAggExecutor`], the group key should be
 /// provided.
 pub async fn generate_agg_state<S: StateStore>(
-    key: Option<&Row>,
+    group_key: Option<&Row>,
     agg_calls: &[AggCall],
     keyspace: &Keyspace<S>,
     pk_data_types: PkDataTypes,
+    group_key_data_types: Option<&[DataType]>,
     epoch: u64,
 ) -> Result<AggState<S>> {
     let mut managed_states = vec![];
@@ -304,24 +305,22 @@ pub async fn generate_agg_state<S: StateStore>(
     let mut row_count = None;
 
     for (idx, agg_call) in agg_calls.iter().enumerate() {
-        // TODO: in pure in-memory engine, we should not do this serialization.
-
-        // The prefix of the state is <(group key) / state id />
-        let keyspace = {
-            let mut ks = keyspace.clone();
-            if let Some(key) = key {
-                let bytes = key.serialize().unwrap();
-                ks.push(Segment::VariantLength(bytes));
-            }
-            ks.push(Segment::u16(idx as u16));
-            ks
+        let group_key: Vec<Datum> = match group_key {
+            None => vec![],
+            Some(Row(r)) => r.clone(),
+        };
+        let group_key_data_types = match group_key_data_types {
+            None => vec![],
+            Some(dt) => dt.to_vec(),
         };
 
         let mut managed_state = ManagedStateImpl::create_managed_state(
+            group_key,
             agg_call.clone(),
-            keyspace,
+            keyspace.clone(),
             row_count,
             pk_data_types.clone(),
+            group_key_data_types,
             idx == ROW_COUNT_COLUMN,
         )
         .await?;

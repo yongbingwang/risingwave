@@ -24,10 +24,10 @@ mod string_agg;
 
 pub use extreme::*;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
+use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-use risingwave_common::types::Datum;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -96,10 +96,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
 
     /// Create a managed state from `agg_call`.
     pub async fn create_managed_state(
+        group_key: Vec<Datum>,
         agg_call: AggCall,
         keyspace: Keyspace<S>,
         row_count: Option<usize>,
         pk_data_types: PkDataTypes,
+        group_key_data_types: Vec<DataType>,
         is_row_count: bool,
     ) -> Result<Self> {
         match agg_call.kind {
@@ -110,12 +112,14 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 );
                 Ok(Self::Extreme(
                     create_streaming_extreme_state(
+                        group_key,
                         agg_call,
                         keyspace,
                         row_count.unwrap(),
                         // TODO: estimate a good cache size instead of hard-coding
                         Some(1024),
                         pk_data_types,
+                        group_key_data_types,
                     )
                     .await?,
                 ))
@@ -132,17 +136,17 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     "should set row_count for value states other than AggKind::RowCount"
                 );
                 Ok(Self::Value(
-                    ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                    ManagedValueState::new(agg_call, group_key, keyspace, row_count).await?,
                 ))
             }
             AggKind::RowCount => {
                 assert!(is_row_count);
                 Ok(Self::Value(
-                    ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                    ManagedValueState::new(agg_call, group_key, keyspace, row_count).await?,
                 ))
             }
             AggKind::SingleValue => Ok(Self::Value(
-                ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                ManagedValueState::new(agg_call, group_key, keyspace, row_count).await?,
             )),
         }
     }

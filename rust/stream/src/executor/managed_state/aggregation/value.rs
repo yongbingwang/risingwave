@@ -16,7 +16,8 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-use risingwave_common::types::Datum;
+use risingwave_common::types::{serialize_datum_into, Datum};
+use risingwave_common::util::ordered::serialize_pk;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
@@ -113,7 +114,10 @@ impl<S: StateStore> ManagedValueState<S> {
 
         let mut local = write_batch.prefixify(&self.keyspace);
         let v = self.state.get_output()?;
-        local.put_single(serialize_cell(&v)?);
+        local.put(
+            serialize_pk(&Row::new(self.group_key.clone())),
+            serialize_cell(&v)?,
+        );
         self.is_dirty = false;
         Ok(())
     }

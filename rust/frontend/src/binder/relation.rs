@@ -34,6 +34,7 @@ pub enum Relation {
     BaseTable(Box<BoundBaseTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
+    TableFunction(Box<TableFunction>),
 }
 
 #[derive(Debug)]
@@ -54,6 +55,11 @@ pub struct BoundBaseTable {
 #[derive(Debug)]
 pub struct BoundSubquery {
     pub query: BoundQuery,
+}
+
+#[derive(Debug)]
+pub enum TableFunction {
+    GenerateSeries(Vec<ExprImpl>),
 }
 
 impl Binder {

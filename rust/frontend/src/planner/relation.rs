@@ -14,8 +14,7 @@
 //
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-
-use crate::binder::{BoundBaseTable, BoundJoin, Relation};
+use crate::binder::{BoundBaseTable, BoundJoin, Relation, TableFunction};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalScan, PlanRef};
 use crate::planner::Planner;
 
@@ -26,6 +25,7 @@ impl Planner {
             // TODO: order is ignored in the subquery
             Relation::Subquery(q) => Ok(self.plan_query(q.query)?.as_subplan()),
             Relation::Join(join) => self.plan_join(*join),
+            Relation::TableFunction(table_function) => self.bind_table_function(*table_function),
         }
     }
 
@@ -57,5 +57,11 @@ impl Planner {
         let join_type = risingwave_pb::plan::JoinType::Inner;
         let on_clause = join.cond;
         Ok(LogicalJoin::create(left, right, join_type, on_clause))
+    }
+
+    pub(super) fn bind_table_function(&mut self, table_function: TableFunction) -> Result<PlanRef> {
+        dbg!(&table_function);
+        // dbg!()
+        todo!()
     }
 }

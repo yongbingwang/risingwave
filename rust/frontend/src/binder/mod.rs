@@ -32,7 +32,7 @@ pub use bind_context::BindContext;
 pub use delete::BoundDelete;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
-pub use relation::{BoundBaseTable, BoundJoin, Relation};
+pub use relation::{BoundBaseTable, BoundJoin, Relation, TableFunction};
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;

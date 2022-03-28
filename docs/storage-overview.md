@@ -11,7 +11,7 @@ Reading this document requires prior knowledge of LSM-tree based KV storage engi
 
 Hummock consists of a manager service on meta node, clients on compute nodes, and a shared storage to store files. Every time a new write batch is produced, `HummockClient` will upload those files to shared storage, and notify the `HummockManager` of the new data. With compaction going on, new files will be added and old files will be vacuumed. The `HummockManager` will take care of the lifecycle of a file — is a file is being used? can we delete a file? etc.
 
-Streaming state store has distinguish workload characteristics.
+Streaming state store has distinguished workload characteristics.
 
 * Every streaming executor will only read *and write its own portion of data*, which are multiple consecutive non-overlapping ranges of keys (we call it *key space*).
 * Data (generally) *won’t be shared across nodes*, so every worker node will only read and write its own data. Therefore, all Hummock API like get, scan only guarantees writes on one node can be immediately read from the same node. In some cases, if we want to read data written from other nodes, we will need to *wait for the epoch*.

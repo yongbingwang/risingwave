@@ -2,12 +2,12 @@
 
 ## Overview
 
-Risingwave provides real time analytical results to serve user’s need. This is done by defining materialized views (MV). All materialized views will be automatically refreshed according to recent updates, such that querying materialized views will reflect real time analytical results. Such refreshing is carried out by our RisingWave streaming engine. 
+RisingWave provides real time analytical results to serve user’s need. This is done by defining materialized views (MV). All materialized views will be automatically refreshed according to recent updates, such that querying materialized views will reflect real time analytical results. Such refreshing is carried out by our RisingWave streaming engine. 
 
 The core design principles of RisingWave streaming engine are summarized as follows. 
 
 * Actor model based execution engine.* We create a set of actors such that each actor react to its own input message, including both data update and control signal. In this way we build a highly concurrent and efficient streaming engine. 
-* Shared storage for states.* The backbone of the state storage is based on sharing cloud block storage (currently AWS S3), which give us computational elasticity,  cheap and infinite storage capacity, and simplicity in configuration change.  
+* Shared storage for states.* The backbone of the state storage is based on sharing cloud block storage (currently AWS S3), which give us computational elasticity, cheap and infinite storage capacity, and simplicity in configuration change.  
 * Everything is a table, everything is a state.* We treat every object in our internal storage as both a logical table and an internal state. Therefore they can be effectively managed by catalog, and be updated in a unified streaming engine with consistency guarantee. 
 
 In this document we give an overview of RisingWave streaming engine. We begin with a recap some backgrounds. Then we introduce the compute node architecture. Next we dive into details about the design of actors, checkpoint, consistency, fault tolerance, and configuration change. We continue our discussions on some advanced features in the streaming engine. Finally we summarize frequently mentioned concepts in a table. 
@@ -16,7 +16,7 @@ In this document we give an overview of RisingWave streaming engine. We begin wi
 
 ![streaming-architecture](./images/streaming-architecture.png)
 
-The overall architecture of Risingwave is depicted in the figure above. In this document, we mainly focus on the compute node side, and explains on how the streaming engine is designed on the compute node. 
+The overall architecture of RisingWave is depicted in the figure above. In this document, we mainly focus on the compute node side, and explains on how the streaming engine is designed on the compute node. 
 
 ## Actor model
 

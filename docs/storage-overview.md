@@ -89,7 +89,7 @@ For scan, we simply select by overlapping key range. For point get, we will filt
 
 
 ### Compaction
-Currently, Hummock uses a leveled compaction strategy for compaction. In the future, we will migrate to a compaction scheme that can “understand” how data are distributed in streaming executors for better data locality.
+Currently, Hummock is using a compaction strategy similar to leveled-compaction in RocksDB. In the future, we will migrate to a compaction scheme that can “understand” how data are distributed in streaming executors for better data locality.
 
 To support MVCC read without affecting compaction, we track the epoch low watermark in Hummock snapshots. A user key-value pair will be retained if (1) it is the latest, or (2) it belongs to an epoch above the low watermark.
 
@@ -104,3 +104,12 @@ Currently, there will be only one checkpoint happening in the system at the same
 As mentioned in [Read Path](#read-path), reads are performed on a ***version*** based on a given ***epoch***. During the whole read process, data from the specified read epoch should not be removed by compaction, which is guaranteed by ***pinning an epoch*** (aka. ***pinning a snapshot***), and SSTs within a ***version*** should not be vacuumed by compaction, which is guaranteed by ***pinning a version***
 
 The SQL frontend will get the latest epoch from meta service. Then, it will embed the epoch number into SQL plans, so that all compute nodes will read from that epoch. In theory, both SQL frontend and compute nodes will *pin the snapshot*, to handle the case that frontend goes down and the compute nodes are still reading from Hummock (#622). However, to simplify the process, currently we *only pin on the frontend side**.*
+
+
+![hummock-manager](./images/hummock-manager.svg)
+
+Hummock only guarantees that writes on one node can be immediately read from the same node. However, the worker nodes running batch queries might have a slightly outdated version with a batch query plan is received (due to the local version caching). Therefore, we have a `wait_epoch` interface to wait until the local cached version contains full data of one epoch.
+
+When there is no reference to a version, all file deletions in this version can be actually applied. There is a background vacuum task dealing with the actual deletion.
+
+## 

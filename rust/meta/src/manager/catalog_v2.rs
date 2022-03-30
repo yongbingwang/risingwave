@@ -30,6 +30,8 @@ use tokio::sync::{Mutex, MutexGuard};
 
 use super::IdCategory;
 use crate::manager::MetaSrvEnv;
+use crate::manager::IdCategory::Source;
+use crate::manager::NotificationManagerRef;
 use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
@@ -112,6 +114,11 @@ where
     pub async fn list_sources(&self) -> Result<Vec<Source>> {
         let core = self.core.lock().await;
         Source::list(core.env.meta_store()).await
+    }
+
+    pub async fn get_source(&self, id: SourceId) -> Result<Option<Source>> {
+        let core = self.core.lock().await;
+        Source::select(&*core.meta_store_ref, &id).await
     }
 
     pub async fn create_database(&self, database: &Database) -> Result<CatalogVersion> {

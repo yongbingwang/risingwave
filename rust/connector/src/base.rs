@@ -18,18 +18,16 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
-
 use serde::{Deserialize, Serialize};
-use crate::{kafka, pulsar};
-use crate::pulsar::PulsarSplitEnumerator;
-use crate::kafka::KafkaSplitEnumerator;
 
+use crate::kafka::KafkaSplitEnumerator;
+use crate::pulsar::PulsarSplitEnumerator;
+use crate::{kafka, pulsar};
 
 pub enum SourceOffset {
     Number(i64),
     String(String),
 }
-
 
 pub trait SourceMessage {
     fn payload(&self) -> Result<Option<&[u8]>>;

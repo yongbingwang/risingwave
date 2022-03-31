@@ -20,7 +20,6 @@ mod utils;
 use clap::Parser;
 use operations::*;
 use risingwave_common::config::StorageConfig;
-use risingwave_storage::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 

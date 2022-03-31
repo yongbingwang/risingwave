@@ -37,7 +37,7 @@ pub use vacuum::*;
 use crate::manager::{LocalNotification, NotificationManagerRef};
 use crate::storage::MetaStore;
 
-/// Start hummock's asynchronous tasks.
+/// Starts hummock's asynchronous tasks.
 pub async fn start_hummock_workers<S>(
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: Arc<CompactorManager>,
@@ -59,7 +59,7 @@ where
     ]
 }
 
-/// Start a task to handle cluster membership change.
+/// Starts a task to handle cluster membership change.
 pub async fn subscribe_cluster_membership_change<S>(
     hummock_manager: Arc<HummockManager<S>>,
     compactor_manager: Arc<CompactorManager>,

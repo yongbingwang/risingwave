@@ -27,21 +27,21 @@ use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::mock::MockHummockMetaService;
 use crate::hummock::{HummockEpoch, HummockResult, HummockSSTableId, HummockVersionId};
 
-/// Note: `MockHummockMetaClient` will be reimplemented by wrapping `HummockManager`.
-pub struct MockHummockMetaClient {
+/// Note: `OldMockHummockMetaClient` will be reimplemented by wrapping `HummockManager`.
+pub struct OldMockHummockMetaClient {
     mock_hummock_meta_service: Arc<MockHummockMetaService>,
 }
 
-impl MockHummockMetaClient {
-    pub fn new(mock_hummock_meta_service: Arc<MockHummockMetaService>) -> MockHummockMetaClient {
-        MockHummockMetaClient {
+impl OldMockHummockMetaClient {
+    pub fn new(mock_hummock_meta_service: Arc<MockHummockMetaService>) -> OldMockHummockMetaClient {
+        OldMockHummockMetaClient {
             mock_hummock_meta_service,
         }
     }
 }
 
 #[async_trait]
-impl HummockMetaClient for MockHummockMetaClient {
+impl HummockMetaClient for OldMockHummockMetaClient {
     async fn pin_version(&self, last_pinned: HummockVersionId) -> HummockResult<HummockVersion> {
         let response = self
             .mock_hummock_meta_service

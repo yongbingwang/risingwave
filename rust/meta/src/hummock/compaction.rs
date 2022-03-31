@@ -375,8 +375,8 @@ impl CompactStatus {
         }
     }
 
-    /// Return Some(Vec<table id to delete>) if succeeds.
-    /// Return None if the task has been processed previously.
+    /// Returns Some(Vec<table id to delete>) if succeeds.
+    /// Returns None if the task has been processed previously.
     #[allow(clippy::needless_collect)]
     pub fn report_compact_task(
         &mut self,

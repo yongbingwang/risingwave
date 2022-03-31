@@ -44,7 +44,7 @@ use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{Error, MetaStore, Transaction};
 
-// Update to states are performed as follow:
+// Updates to states are performed as follows:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
 // - Call `commit_multi_var` to commit the changes via meta store transaction. If transaction
@@ -53,7 +53,7 @@ use crate::storage::{Error, MetaStore, Transaction};
 pub struct HummockManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
-    // When trying to locks compaction and versioning at the same time, compaction lock should
+    // When trying to lock compaction and versioning at the same time, compaction lock should
     // be requested before versioning lock.
     compaction: Mutex<Compaction>,
     versioning: RwLock<Versioning>,
@@ -186,7 +186,7 @@ where
         Ok(instance)
     }
 
-    /// Load state from meta store.
+    /// Loads state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
         let mut compaction_guard = self.compaction.lock().await;
         compaction_guard.compact_status = CompactStatus::get(self.env.meta_store())
@@ -281,12 +281,12 @@ where
         meta_store.txn(trx).await.map_err(Into::into)
     }
 
-    /// Pin a hummock version that is greater than `last_pinned`. The pin belongs to `context_id`
+    /// Pins a hummock version that is greater than `last_pinned`. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
     /// `last_pinned` helps to make `pin_version` retryable:
-    /// 1 Return the smallest already pinned version of `context_id` that is greater than
+    /// 1 Returns the smallest already pinned version of `context_id` that is greater than
     /// `last_pinned`, if any.
-    /// 2 Otherwise pin and return the current greatest version.
+    /// 2 Otherwise pins and returns the current greatest version.
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
@@ -593,7 +593,7 @@ where
         Ok(ret_hummock_version)
     }
 
-    /// Pin a hummock snapshot that is greater than `last_pinned`. The pin belongs to `context_id`
+    /// Pins a hummock snapshot that is greater than `last_pinned`. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
     /// `last_pinned` helps to `pin_snapshot` retryable, see `pin_version` for detail.
     pub async fn pin_snapshot(
@@ -1098,7 +1098,7 @@ where
         Ok(sstable_id)
     }
 
-    /// Release resources pinned by these contexts, including:
+    /// Releases resources pinned by these contexts, including:
     /// - Version
     /// - Snapshot
     /// - Compact task
@@ -1168,7 +1168,7 @@ where
         Ok(())
     }
 
-    /// List version ids in ascending order. TODO: support limit parameter
+    /// Lists version ids in ascending order. TODO: support limit parameter
     pub async fn list_version_ids_asc(&self) -> Result<Vec<HummockVersionId>> {
         let versioning_guard = self.versioning.read().await;
         let version_ids = versioning_guard
@@ -1179,7 +1179,7 @@ where
         Ok(version_ids)
     }
 
-    /// Get the reference count of given version id
+    /// Gets the reference count of given version id
     pub async fn get_version_pin_count(
         &self,
         version_id: HummockVersionId,
@@ -1193,7 +1193,7 @@ where
         Ok(count as HummockRefCount)
     }
 
-    /// Get the `SSTable` ids which are guaranteed not to be included after `version_id`, thus they
+    /// Gets the `SSTable` ids which are guaranteed not to be included after `version_id`, thus they
     /// can be deleted if all versions LE than `version_id` are not referenced.
     #[cfg(test)]
     pub async fn get_ssts_to_delete(
@@ -1208,7 +1208,7 @@ where
             .unwrap_or_default())
     }
 
-    /// Delete metadata of the given `version_id`
+    /// Deletes metadata of the given `version_id`
     pub async fn delete_version(&self, version_id: HummockVersionId) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
         // Delete record in HummockVersion if any.
@@ -1323,7 +1323,7 @@ where
         Ok(())
     }
 
-    /// Release invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
+    /// Releases invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
     async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
         let active_context_ids = {
             let compaction_guard = self.compaction.lock().await;

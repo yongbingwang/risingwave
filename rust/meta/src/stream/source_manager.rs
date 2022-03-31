@@ -14,25 +14,19 @@
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::TryFutureExt;
-use log::{info, warn};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_connector::{extract_split_enumerator, SourceSplit, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source, StreamSourceInfo};
-use risingwave_pb::expr::expr_node::Type::In;
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType::Hash;
+use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::meta::table_fragments::Fragment;
 use tokio::sync::Mutex;
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId, TableId};
-use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
@@ -45,7 +39,6 @@ pub struct SourceManager<S: MetaStore> {
     barrier_manager_ref: BarrierManagerRef<S>,
     catalog_manager_ref: CatalogManagerRef<S>,
 }
-
 
 pub struct SourceManagerCore<S: MetaStore> {
     source_jobs: HashMap<SourceId, DiscoveryJob>,
@@ -67,15 +60,14 @@ pub struct CreateSourceContext {
 }
 
 impl<S> SourceManagerCore<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     fn new() -> Self {
         todo!()
     }
 }
 
-#[derive(Default, Debug)]
 pub struct DiscoveryJob {
     enumerator: SplitEnumeratorImpl,
     last_splits: Mutex<Vec<SplitImpl>>,
@@ -106,11 +98,11 @@ impl DiscoveryJob {
 }
 
 impl<S> SourceManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub async fn new(
-        meta_srv_env: MetaSrvEnv<S>,
+        _meta_srv_env: MetaSrvEnv<S>,
         barrier_manager_ref: BarrierManagerRef<S>,
         catalog_manager_ref: CatalogManagerRef<S>,
     ) -> Result<Self> {
@@ -150,10 +142,10 @@ impl<S> SourceManager<S>
                 .await?
                 .ok_or(RwError::from(InternalError(format!(
                     "source {} does not exists",
-                    ctx.source_id
+                    source_id,
                 ))))?;
 
-            let source_info = match source.get_info()? {
+            let source_info = match source.get_info()?.clone() {
                 Info::StreamSource(s) => s,
                 _ => {
                     return Err(RwError::from(InternalError(
@@ -165,17 +157,14 @@ impl<S> SourceManager<S>
             infos.insert(source_id, source_info);
         }
 
-        for (source_id, info) in infos.into_iter() {
-            core.source_jobs.entry(*source_id).or_insert_with(|| {
-                let job = DiscoveryJob::new(info.clone());
-                job
-            });
+        for (source_id, info) in infos {
+            core.source_jobs
+                .entry(*source_id)
+                .or_insert_with(|| DiscoveryJob::new(info.clone()).unwrap());
         }
 
-        core.materialized_views.insert(
-            ctx.materialized_view_id.clone(),
-            std::mem::replace(&mut ctx.fragments, Default::default()),
-        );
+        core.materialized_views
+            .insert(ctx.materialized_view_id, std::mem::take(&mut ctx.fragments));
 
         Ok(())
     }

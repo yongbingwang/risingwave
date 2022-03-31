@@ -160,12 +160,29 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         tokio::spawn(async move { barrier_manager.run().await.unwrap() });
     }
 
+    let source_manager = Arc::new(
+        SourceManager::new(
+            env.clone(),
+            barrier_manager.clone(),
+            catalog_manager_v2.clone(),
+        )
+        .await
+        .unwrap(),
+    );
+    {
+        let source_manager = source_manager.clone();
+        tokio::spawn(async move {
+            source_manager.run().await.unwrap();
+        });
+    }
+
     let stream_manager = Arc::new(
         GlobalStreamManager::new(
             env.clone(),
             fragment_manager.clone(),
             barrier_manager.clone(),
             cluster_manager.clone(),
+            source_manager.clone(),
         )
         .await
         .unwrap(),
@@ -175,19 +192,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
-
-    let source_manager = Arc::new(
-        SourceManager::new(meta_store, barrier_manager.clone())
-            .await
-            .unwrap(),
-    );
-
-    {
-        let source_manager = source_manager.clone();
-        tokio::spawn(async move {
-            source_manager.run().await.unwrap();
-        });
-    }
 
     let epoch_srv = EpochServiceImpl::new(epoch_generator.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());

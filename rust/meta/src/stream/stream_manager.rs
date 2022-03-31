@@ -50,7 +50,6 @@ pub struct CreateMaterializedViewContext {
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
 }
 
-
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager<S: MetaStore> {
     /// Manages definition and status of fragments and actors
@@ -78,9 +77,9 @@ where
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
-        fragment_manager_ref: FragmentManagerRef<S>,
-        barrier_manager_ref: BarrierManagerRef<S>,
-        cluster_manager_ref: StoredClusterManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
+        barrier_manager: BarrierManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
         source_manager_ref: SourceManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
@@ -89,7 +88,7 @@ where
             scheduler: Scheduler::new(cluster_manager.clone()),
             cluster_manager,
             clients: env.stream_clients_ref(),
-            source_manager_ref: source_manager_ref.clone(),
+            source_manager_ref,
         })
     }
 
@@ -334,7 +333,7 @@ mod tests {
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
-    use crate::stream::FragmentManager;
+    use crate::stream::{FragmentManager, SourceManager};
 
     struct FakeFragmentState {
         actor_streams: Mutex<HashMap<ActorId, StreamActor>>,
@@ -493,17 +492,27 @@ mod tests {
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
-                catalog_manager,
+                catalog_manager.clone(),
                 fragment_manager.clone(),
                 hummock_manager,
                 meta_metrics.clone(),
             ));
+
+            let source_manager = Arc::new(
+                SourceManager::new(
+                    env.clone(),
+                    barrier_manager.clone(),
+                    catalog_manager.clone(),
+                )
+                .await?,
+            );
 
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
                 fragment_manager.clone(),
                 barrier_manager.clone(),
                 cluster_manager.clone(),
+                source_manager.clone(),
             )
             .await?;
 

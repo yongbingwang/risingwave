@@ -122,6 +122,7 @@ impl StateStoreImpl {
                     object_store,
                     config.data_directory.to_string(),
                 ));
+
                 let inner = HummockStateStore::new(
                     HummockStorage::new(
                         config.clone(),

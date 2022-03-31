@@ -78,9 +78,20 @@ pub async fn compute_node_serve(
 
     let registry = prometheus::Registry::new();
     // Initialize state store.
-    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let storage_config = Arc::new(config.storage.clone());
+    let mut state_store_metrics = StateStoreMetrics::new(registry.clone());
+
+    // set shared buffer threshold size
+    state_store_metrics.shared_buffer_threshold_size =
+        (config.storage.shared_buffer_size_mb * (1 << 20)) as u64;
+
+    let state_store_metrics = Arc::new(state_store_metrics);
+    info!(
+        "Shared buffer threhold size{}",
+        state_store_metrics.shared_buffer_threshold_size
+    );
+
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,
@@ -91,8 +102,11 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
+    // store handle of hummock state sync worker
+    let mut state_store_sync_task = None;
+
     // A hummock compactor is deployed along with compute node for now.
-    if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
+    if let StateStoreImpl::HummockStateStore(mut hummock) = state_store.clone() {
         sub_tasks.push(Compactor::start_compactor(
             hummock.inner().storage.options().clone(),
             hummock.inner().storage.local_version_manager().clone(),
@@ -100,6 +114,9 @@ pub async fn compute_node_serve(
             hummock.inner().storage.sstable_store(),
             state_store_metrics,
         ));
+
+        let join_handle = hummock.start_sync_worker(Arc::new(state_store.clone()));
+        state_store_sync_task = Some(join_handle);
     }
 
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
@@ -148,6 +165,12 @@ pub async fn compute_node_serve(
                                 if let Err(err) = join_handle.await {
                                     tracing::warn!("shutdown err: {}", err);
                                 }
+                            }
+                        }
+
+                        if let Some(join_handle) = state_store_sync_task {
+                            if let Err(err) = join_handle.await {
+                                tracing::warn!("shutdown err: {}", err);
                             }
                         }
                     },

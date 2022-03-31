@@ -1,3 +1,5 @@
+use std::sync::atomic;
+
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,7 +13,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
@@ -82,6 +83,8 @@ macro_rules! define_state_store_metrics {
         /// job or a executor should be collected by views like `StateStats` and `JobStats`.
         #[derive(Debug)]
         pub struct StateStoreMetrics {
+            pub shared_buffer_cur_size: atomic::AtomicU64,
+            pub shared_buffer_threshold_size: u64,
             $( pub $name: $type, )*
         }
     }
@@ -281,8 +284,12 @@ impl StateStoreMetrics {
             buckets
         );
         let iter_next_size = register_histogram_with_registry!(opts, registry).unwrap();
+        let shared_buffer_cur_size = atomic::AtomicU64::new(0);
+        let shared_buffer_threshold_size = 0;
 
         Self {
+            shared_buffer_cur_size,
+            shared_buffer_threshold_size,
             get_latency,
             get_key_size,
             get_value_size,

@@ -68,6 +68,7 @@ async fn get_hummock_meta_client() -> MockHummockMetaClient {
 async fn get_hummock_storage() -> (HummockStorage, Arc<HummockManager<MemStore>>) {
     let remote_dir = "hummock_001_test".to_string();
     let options = Arc::new(StorageConfig {
+        shared_buffer_size_mb: 1024,
         sstable_size: 64,
         block_size: 1 << 10,
         bloom_false_positive: 0.1,

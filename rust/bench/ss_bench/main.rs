@@ -34,6 +34,9 @@ pub(crate) struct Opts {
     store: String,
 
     // ----- Hummock -----
+    #[clap(long, default_value_t = 1024)]
+    shared_buffer_size_mb: u32,
+
     #[clap(long, default_value_t = 256)]
     table_size_mb: u32,
 
@@ -124,6 +127,7 @@ async fn main() {
     println!("Configurations after preprocess:\n {:?}", &opts);
 
     let config = Arc::new(StorageConfig {
+        shared_buffer_size_mb: opts.shared_buffer_size_mb,
         bloom_false_positive: opts.bloom_false_positive,
         checksum_algo: parse_checksum_algo(&opts.checksum_algo).unwrap(),
         sstable_size: opts.table_size_mb * (1 << 20),

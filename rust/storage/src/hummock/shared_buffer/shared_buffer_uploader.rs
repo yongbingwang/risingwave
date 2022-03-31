@@ -24,6 +24,7 @@ use crate::hummock::compactor::{Compactor, SubCompactContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::{BoxedHummockIterator, MergeIterator};
+use crate::hummock::key::Epoch;
 use crate::hummock::key_range::KeyRange;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -33,7 +34,7 @@ use crate::monitor::StateStoreMetrics;
 #[derive(Debug)]
 pub struct SyncItem {
     /// Epoch to sync. None means syncing all epochs.
-    pub(super) epoch: Option<u64>,
+    pub(super) epoch: Option<Epoch>,
     /// Notifier to notify on sync finishes
     pub(super) notifier: Option<tokio::sync::oneshot::Sender<HummockResult<()>>>,
 }

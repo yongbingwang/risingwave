@@ -50,6 +50,7 @@ pub struct CreateMaterializedViewContext {
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
 }
 
+
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager<S: MetaStore> {
     /// Manages definition and status of fragments and actors

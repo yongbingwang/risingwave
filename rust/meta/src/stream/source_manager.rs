@@ -12,21 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Duration;
 
-use log::warn;
+use futures::TryFutureExt;
+use log::{info, warn};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
-use risingwave_connector::{extract_split_enumerator, SourceSplit, SplitImpl};
+use risingwave_connector::{extract_split_enumerator, SourceSplit, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source, StreamSourceInfo};
+use risingwave_pb::expr::expr_node::Type::In;
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType::Hash;
 use risingwave_pb::meta::table_fragments::Fragment;
 use tokio::sync::Mutex;
 
 use crate::barrier::BarrierManagerRef;
-use crate::manager::{CatalogManagerRef, SourceId};
+use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId, TableId};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 
@@ -35,26 +40,87 @@ pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 pub type SourceSplitID = String;
 
 #[allow(dead_code)]
-pub struct SourceManager<S> {
+pub struct SourceManager<S: MetaStore> {
     core: Mutex<SourceManagerCore<S>>,
-    meta_store_ref: Arc<S>,
     barrier_manager_ref: BarrierManagerRef<S>,
     catalog_manager_ref: CatalogManagerRef<S>,
-    last_assignment: HashMap<ActorId, Vec<String>>,
 }
 
 
-impl<S> SourceManager<S>
-where
-    S: MetaStore,
+pub struct SourceManagerCore<S: MetaStore> {
+    source_jobs: HashMap<SourceId, DiscoveryJob>,
+    materialized_views: HashMap<TableId, HashMap<SourceId, Vec<Fragment>>>,
+    meta_srv_env: MetaSrvEnv<S>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum SourceState {
+    Ready,
+    Running,
+    Disabled,
+}
+
+pub struct CreateSourceContext {
+    pub materialized_view_id: TableId,
+    pub fragments: HashMap<SourceId, Vec<Fragment>>,
+    pub init_state: SourceState,
+}
+
+impl<S> SourceManagerCore<S>
+    where
+        S: MetaStore,
 {
+    fn new() -> Self {
+        todo!()
+    }
+}
 
+#[derive(Default, Debug)]
+pub struct DiscoveryJob {
+    enumerator: SplitEnumeratorImpl,
+    last_splits: Mutex<Vec<SplitImpl>>,
+}
 
+impl DiscoveryJob {
+    fn new(source: StreamSourceInfo) -> Result<Self> {
+        let enumerator = extract_split_enumerator(source.get_properties()).to_rw_result()?;
+        Ok(Self {
+            enumerator,
+            last_splits: Mutex::new(Vec::new()),
+        })
+    }
+
+    async fn run(&mut self) -> Result<()> {
+        loop {
+            // TODO(Peng): error handler
+            let splits = self.enumerator.list_splits().await.unwrap();
+
+            {
+                let mut last_splits = self.last_splits.lock().await;
+                *last_splits = splits;
+            }
+
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+}
+
+impl<S> SourceManager<S>
+    where
+        S: MetaStore,
+{
     pub async fn new(
-        meta_store_ref: Arc<S>,
+        meta_srv_env: MetaSrvEnv<S>,
         barrier_manager_ref: BarrierManagerRef<S>,
         catalog_manager_ref: CatalogManagerRef<S>,
     ) -> Result<Self> {
+        Ok(Self {
+            core: Mutex::new(SourceManagerCore::new()),
+            // meta_srv_env,
+            barrier_manager_ref,
+            catalog_manager_ref,
+            // last_assignment: Default::default(),
+        })
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -62,17 +128,29 @@ where
         Ok(())
     }
 
-    async fn start_source(&self, source_id: SourceId, fragment: &Fragment) -> Result<()> {
+    async fn create_source(&self, mut ctx: CreateSourceContext) -> Result<()> {
         let mut core = self.core.lock().await;
 
-        if !core.jobs.contains_key(&source_id) {
+        if core
+            .materialized_views
+            .contains_key(ctx.materialized_view_id.borrow())
+        {
+            return Err(RwError::from(InternalError(format!(
+                "mv {} already registered in source manager",
+                ctx.materialized_view_id
+            ))));
+        }
+
+        let mut infos = HashMap::with_capacity(ctx.fragments.len());
+
+        for source_id in ctx.fragments.keys() {
             let source = self
                 .catalog_manager_ref
-                .get_source(source_id)
+                .get_source(*source_id)
                 .await?
                 .ok_or(RwError::from(InternalError(format!(
                     "source {} does not exists",
-                    source_id
+                    ctx.source_id
                 ))))?;
 
             let source_info = match source.get_info()? {
@@ -80,18 +158,24 @@ where
                 _ => {
                     return Err(RwError::from(InternalError(
                         "only stream source is support".to_string(),
-                    )))
+                    )));
                 }
             };
 
-            let job = SourceJob::new(source_info.clone())?;
-
-            core.jobs.insert(source_id, job);
+            infos.insert(source_id, source_info);
         }
 
-        let job = core.jobs.get_mut(&fragment.fragment_id).unwrap();
+        for (source_id, info) in infos.into_iter() {
+            core.source_jobs.entry(*source_id).or_insert_with(|| {
+                let job = DiscoveryJob::new(info.clone());
+                job
+            });
+        }
 
-        let _ = job.add(fragment.clone()).await?;
+        core.materialized_views.insert(
+            ctx.materialized_view_id.clone(),
+            std::mem::replace(&mut ctx.fragments, Default::default()),
+        );
 
         Ok(())
     }

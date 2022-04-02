@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 mod operations;
 mod utils;
@@ -20,6 +21,13 @@ mod utils;
 use clap::Parser;
 use operations::*;
 use risingwave_common::config::StorageConfig;
+use risingwave_meta::cluster::ClusterManager;
+use risingwave_meta::hummock::mock_hummock_meta_client::MockHummockMetaClient;
+use risingwave_meta::hummock::HummockManager;
+use risingwave_meta::manager::{MemEpochGenerator, MetaSrvEnv};
+use risingwave_meta::rpc::metrics::MetaMetrics;
+use risingwave_meta::storage::MemStore;
+use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
@@ -106,6 +114,41 @@ fn preprocess_options(opts: &mut Opts) {
     }
 }
 
+async fn gen_mock_hummock_meta_client() -> Arc<MockHummockMetaClient> {
+    let meta_store = Arc::new(MemStore::default());
+    let epoch_generator = Arc::new(MemEpochGenerator::new());
+    let env = MetaSrvEnv::new(meta_store, epoch_generator).await;
+    let cluster_manager = Arc::new(
+        ClusterManager::new(env.clone(), Duration::from_secs(1))
+            .await
+            .unwrap(),
+    );
+    let fake_host_address = HostAddress {
+        host: "127.0.0.1".to_string(),
+        port: 80,
+    };
+    let (worker_node, _) = cluster_manager
+        .add_worker_node(fake_host_address.clone(), WorkerType::ComputeNode)
+        .await
+        .unwrap();
+    cluster_manager
+        .activate_worker_node(fake_host_address)
+        .await
+        .unwrap();
+
+    let hummock_manager = Arc::new(
+        HummockManager::new(
+            env.clone(),
+            cluster_manager.clone(),
+            Arc::new(MetaMetrics::new()),
+        )
+        .await
+        .unwrap(),
+    );
+
+    Arc::new(MockHummockMetaClient::new(hummock_manager, worker_node.id))
+}
+
 /// This is used to benchmark the state store performance.
 /// For usage, see `README.md`
 #[tokio::main(flavor = "multi_thread")]
@@ -128,9 +171,7 @@ async fn main() {
         meta_cache_capacity: 64 << 20,
     });
 
-    let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
-    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(mock_hummock_meta_service));
-
+    let mock_hummock_meta_client = gen_mock_hummock_meta_client().await;
     let state_store = StateStoreImpl::new(
         &opts.store,
         config,

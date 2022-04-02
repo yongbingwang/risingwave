@@ -32,6 +32,8 @@ use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
+use super::mock_hummock_meta_client::MockHummockMetaClient;
+
 pub async fn add_test_tables<S>(
     hummock_manager: &HummockManager<S>,
     context_id: HummockContextId,
@@ -182,4 +184,9 @@ pub async fn setup_compute_env(
         .await
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)
+}
+
+pub async fn mock_hummock_meta_client() -> Arc<MockHummockMetaClient> {
+    let (_, hummock_manager, _, node) = setup_compute_env(213).await;
+    Arc::new(MockHummockMetaClient::new(hummock_manager, node.id))
 }

@@ -382,7 +382,6 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         iterator_test_key_of_epoch, mock_sstable_store_with_object_store,
     };
-    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::value::HummockValue;
@@ -401,9 +400,7 @@ mod tests {
         let object_store = Arc::new(InMemObjectStore::new());
         let sstable_store = mock_sstable_store_with_object_store(object_store);
         let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
-            MockHummockMetaService::new(),
-        )));
+        let mock_hummock_meta_client = mock_hummock_meta_client();
         let shared_buffer_manager = Arc::new(SharedBufferManager::new(
             Arc::new(default_config_for_test()),
             local_version_manager.clone(),

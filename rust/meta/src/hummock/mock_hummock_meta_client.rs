@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_pb::hummock::{
     CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
     VacuumTask,
@@ -28,7 +29,7 @@ use tonic::Streaming;
 use crate::hummock::HummockManager;
 use crate::storage::MemStore;
 
-pub(crate) struct MockHummockMetaClient {
+pub struct MockHummockMetaClient {
     hummock_manager: Arc<HummockManager<MemStore>>,
     context_id: HummockContextId,
 }
@@ -54,9 +55,9 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(HummockError::meta_error)
     }
 
-    async fn unpin_version(&self, pinned_version_id: HummockVersionId) -> HummockResult<()> {
+    async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> HummockResult<()> {
         self.hummock_manager
-            .unpin_version(self.context_id, pinned_version_id)
+            .unpin_version(self.context_id, pinned_version_ids)
             .await
             .map_err(HummockError::meta_error)
     }
@@ -69,13 +70,12 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(HummockError::meta_error)
     }
 
-    async fn unpin_snapshot(&self, pinned_epoch: HummockEpoch) -> HummockResult<()> {
+    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> HummockResult<()> {
+        let pinned_snapshots = pinned_epochs.iter().map(|e| HummockSnapshot { epoch: *e }).collect_vec();
         self.hummock_manager
             .unpin_snapshot(
                 self.context_id,
-                HummockSnapshot {
-                    epoch: pinned_epoch,
-                },
+                pinned_snapshots,
             )
             .await
             .map_err(HummockError::meta_error)

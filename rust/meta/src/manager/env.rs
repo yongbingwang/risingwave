@@ -45,7 +45,7 @@ where
     /// notification manager.
     notification_manager: NotificationManagerRef,
 
-    /// stream clients memoization.
+    /// stream clients memorization.
     stream_clients: StreamClientsRef,
 }
 
@@ -115,17 +115,8 @@ impl MetaSrvEnv<MemStore> {
     pub async fn for_test() -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = Arc::new(MemStore::default());
-        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let epoch_generator = Arc::new(MemEpochGenerator::new());
-        let notification_manager = Arc::new(NotificationManager::new(epoch_generator.clone()));
-        let stream_clients = Arc::new(StreamClients::default());
 
-        Self {
-            id_gen_manager,
-            meta_store,
-            epoch_generator,
-            notification_manager,
-            stream_clients,
-        }
+        MetaSrvEnv::new(meta_store, epoch_generator).await
     }
 }

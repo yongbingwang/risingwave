@@ -22,6 +22,7 @@ mod model;
 #[cfg(test)]
 pub mod test_utils;
 mod vacuum;
+pub mod mock_hummock_meta_client;
 
 use std::sync::Arc;
 use std::time::Duration;

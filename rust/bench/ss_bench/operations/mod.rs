@@ -18,8 +18,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use rand::prelude::StdRng;
 use rand::SeedableRng;
-use risingwave_storage::hummock::mock::MockHummockMetaClient;
 use risingwave_storage::StateStore;
+use risingwave_meta::hummock::mock_hummock_meta_client::MockHummockMetaClient;
 
 use crate::utils::display_stats::*;
 use crate::utils::latency_stat::LatencyStat;

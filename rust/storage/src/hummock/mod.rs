@@ -73,7 +73,6 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
-pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
 pub type HummockRefCount = u64;
 pub type HummockVersionId = u64;

@@ -135,7 +135,7 @@ impl StateStore for TikvStateStore {
         async move {
             let mut txn = self.client().await.begin_optimistic().await.unwrap();
             for (key, value) in kv_pairs {
-                let value = value.user_value();
+                let value = value.user_value;
                 match value {
                     Some(value) => {
                         txn.put(tikv_client::Key::from(key.to_vec()), value.to_vec())

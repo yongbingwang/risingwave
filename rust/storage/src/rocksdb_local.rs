@@ -99,7 +99,7 @@ impl StateStore for RocksDBStateStore {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
-        async move { self.storage().await.write_batch(kv_pairs).await }
+        async move { self.storage().await.write_batch(kv_pairs) }
     }
 
     fn replicate_batch(
@@ -137,7 +137,7 @@ impl StateStore for RocksDBStateStore {
     }
 
     fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
-        async move { unimplemented!() }
+        async move { self.storage().await.sync().await }
     }
 }
 
@@ -278,10 +278,10 @@ impl RocksDBStorage {
         .await?
     }
 
-    async fn write_batch(&self, kv_pairs: Vec<(Bytes, StorageValue)>) -> Result<()> {
+    fn write_batch(&self, kv_pairs: Vec<(Bytes, StorageValue)>) -> Result<()> {
         let wb = WriteBatch::new();
         for (key, value) in kv_pairs {
-            let value = value.user_value();
+            let value = value.user_value;
             if let Some(value) = value {
                 if let Err(e) = wb.put(key.as_ref(), value.as_ref()) {
                     return Err(InternalError(e).into());
@@ -292,13 +292,17 @@ impl RocksDBStorage {
         }
 
         let db = self.db.clone();
+        let mut opts = WriteOptions::default();
+        opts.set_sync(false);
+        db.write_opt(&wb, &opts)
+            .map_or_else(|e| Err(InternalError(e).into()), |_| Ok(()))
+    }
+
+    async fn sync(&self) -> Result<()> {
+        let db = self.db.clone();
         task::spawn_blocking(move || {
-            let mut opts = WriteOptions::default();
-            opts.set_sync(true);
-            db.write_opt(&wb, &opts)
-                .map_or_else(|e| Err(InternalError(e).into()), |_| Ok(()))
-        })
-        .await?
+            db.flush(true).map_err(|e| InternalError(e).into())
+        }).await?
     }
 
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {

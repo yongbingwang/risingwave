@@ -3753,6 +3753,7 @@ dependencies = [
  "paste",
  "pgwire",
  "rand 0.8.5",
+ "regex",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_meta",

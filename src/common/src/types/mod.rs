@@ -200,6 +200,10 @@ impl DataType {
         )
     }
 
+    pub fn is_struct(&self) -> bool {
+        matches!(self, DataType::Struct { .. })
+    }
+
     pub fn is_string(&self) -> bool {
         matches!(self, DataType::Char | DataType::Varchar)
     }

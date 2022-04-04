@@ -1,7 +1,7 @@
 - sql: |
     select * from t;
   create_source:
-    row_format: protobuf
+    row_format: proto
     file: |
       syntax = "proto3";
       package test;
@@ -26,3 +26,77 @@
   stream_plan: |
     StreamMaterialize { columns: [id, country, country.address, country.city, country.city.address, country.city.zipcode, country.zipcode, zipcode, rate], pk_columns: [] }
       StreamTableScan { table: t, columns: [id, country, country.address, country.city, country.city.address, country.city.zipcode, country.zipcode, zipcode, rate], pk_indices: [] }
+- sql: |
+    select (t).country1.city.*,(t.country2).*,(country3).city.* from t;
+  create_source:
+    row_format: proto
+    file: |
+      syntax = "proto3";
+      package test;
+      message TestRecord {
+        int32 id = 1;
+        Country country1 = 3;
+        Country country2 = 3;
+        Country country3 = 3;
+        int64 zipcode = 4;
+        float rate = 5;
+      }
+      message Country {
+        string address = 1;
+        City city = 2;
+        string zipcode = 3;
+      }
+      message City {
+        string address = 1;
+        string zipcode = 2;
+      }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: t, columns: [country1.city, country1.city.address, country1.city.zipcode, country2, country2.address, country2.city, country2.city.address, country2.city.zipcode, country2.zipcode, country3.city, country3.city.address, country3.city.zipcode] }
+  stream_plan: |
+    StreamMaterialize { columns: [country1.city, country1.city.address, country1.city.zipcode, country2, country2.address, country2.city, country2.city.address, country2.city.zipcode, country2.zipcode, country3.city, country3.city.address, country3.city.zipcode], pk_columns: [] }
+      StreamTableScan { table: t, columns: [country1.city, country1.city.address, country1.city.zipcode, country2, country2.address, country2.city, country2.city.address, country2.city.zipcode, country2.zipcode, country3.city, country3.city.address, country3.city.zipcode], pk_indices: [] }
+- sql: |
+    select (t).id.* from t;
+  create_source:
+    row_format: proto
+    file: |
+      syntax = "proto3";
+      package test;
+      message TestRecord {
+        int32 id = 1;
+        int64 zipcode = 4;
+        float rate = 5;
+      }
+  binder_error: 'Bind error: type Int32 is not composite'
+
+- sql: |
+    select (t).country.city,(t.country).address,(country).city.address from t;
+  create_source:
+    row_format: proto
+    file: |
+      syntax = "proto3";
+      package test;
+      message TestRecord {
+        int32 id = 1;
+        Country country = 3;
+        int64 zipcode = 4;
+        float rate = 5;
+      }
+      message Country {
+        string address = 1;
+        City city = 2;
+        string zipcode = 3;
+      }
+      message City {
+        string address = 1;
+        string zipcode = 2;
+      }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$1, $0, $2], expr_alias: [country.city, country.address, country.city.address] }
+        BatchScan { table: t, columns: [country.address, country.city, country.city.address] }
+  stream_plan: |
+    StreamMaterialize { columns: [country.city, country.address, country.city.address], pk_columns: [] }
+      StreamProject { exprs: [$1, $0, $2], expr_alias: [country.city, country.address, country.city.address] }
+        StreamTableScan { table: t, columns: [country.address, country.city, country.city.address], pk_indices: [] }

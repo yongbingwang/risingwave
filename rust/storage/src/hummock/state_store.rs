@@ -51,11 +51,12 @@ impl StateStore for HummockStateStore {
         Ok(value)
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
-        self.storage
+    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<u64> {
+        let size = self
+            .storage
             .write_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
             .await?;
-        Ok(())
+        Ok(size)
     }
 
     async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>

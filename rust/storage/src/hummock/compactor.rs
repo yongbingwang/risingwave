@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -298,7 +297,7 @@ impl Compactor {
         // TODO: decide upload concurrency
         for (table_id, data, meta) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
-            let sst_size = context
+            let len = context
                 .sstable_store
                 .put(&sst, data, super::CachePolicy::Fill)
                 .await?;
@@ -307,14 +306,8 @@ impl Compactor {
                 context
                     .stats
                     .write_shared_buffer_sync_size
-                    .observe(sst_size as _);
+                    .observe(len as _);
             }
-
-            // decrease shared buffer size after compaction
-            context
-                .stats
-                .shared_buffer_cur_size
-                .fetch_sub(sst_size as u64, Ordering::SeqCst);
 
             output_ssts.push(sst);
         }

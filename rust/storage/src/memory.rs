@@ -82,12 +82,14 @@ impl MemoryStateStore {
         &self,
         kv_pairs: Vec<(Bytes, Option<Bytes>)>,
         epoch: u64,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         let mut inner = self.inner.lock().await;
+        let mut size: u64 = 0;
         for (key, value) in kv_pairs {
+            size += (key.len() + value.as_ref().map_or(0, |x| x.len())) as u64;
             inner.insert((key, Reverse(epoch)), value);
         }
-        Ok(())
+        Ok(size)
     }
 
     async fn scan_inner<R, B>(
@@ -176,7 +178,7 @@ impl StateStore for MemoryStateStore {
         self.reverse_scan_inner(key_range, limit).await
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
+    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<u64> {
         self.ingest_batch_inner(kv_pairs, epoch).await
     }
 

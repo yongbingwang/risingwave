@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -19,11 +20,14 @@ use bytes::Bytes;
 use super::iterator::UserIterator;
 use super::HummockStorage;
 use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+use crate::hummock::key::Epoch;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::test_utils::default_config_for_test;
-use crate::monitor::StateStoreMetrics;
+use crate::hummock::HummockStateStore;
+use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::object::InMemObjectStore;
+use crate::{StateStore, StateStoreImpl};
 
 #[tokio::test]
 async fn test_basic() {
@@ -155,6 +159,116 @@ async fn test_basic() {
     iter.rewind().await.unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
+}
+
+#[tokio::test]
+async fn test_state_store_sync_worker() {
+    let object_store = Arc::new(InMemObjectStore::new());
+    let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
+    let config = Arc::new(default_config_for_test());
+
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+
+    let mut metrics = StateStoreMetrics::unused();
+    metrics.shared_buffer_threshold_size = 64; // 64 bytes
+    let state_store_stats = Arc::new(metrics);
+
+    let hummock_storage = HummockStorage::with_default_stats(
+        config,
+        sstable_store,
+        local_version_manager,
+        Arc::new(MockHummockMetaClient::new(Arc::new(
+            MockHummockMetaService::new(),
+        ))),
+        state_store_stats.clone(),
+    )
+    .await
+    .unwrap();
+
+
+    let state_store = StateStoreImpl::HummockStateStore(MonitoredStateStore::new(
+        HummockStateStore::new(hummock_storage),
+        state_store_stats.clone(),
+    ));
+
+    let mut join_handle = None;
+    if let StateStoreImpl::HummockStateStore(mut mon_store) = state_store.clone() {
+        let state_store_ref = Arc::new(state_store);
+        let handle = mon_store.start_sync_worker(state_store_ref.clone());
+        join_handle.replace(handle);
+
+        let mut epoch: Epoch = 1;
+
+        // ingest 16B batch
+        let mut batch1 = vec![
+            (Bytes::from("aaaa"), Some(Bytes::from("1111"))),
+            (Bytes::from("bbbb"), Some(Bytes::from("2222"))),
+        ];
+
+        // Make sure the batch is sorted.
+        batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+        mon_store.ingest_batch(batch1, epoch).await.unwrap();
+
+        // epoch(8B) will be appended to keys, thus the ingested batch cost 32B in the shared buffer
+        // check sync state store metrics
+        assert_eq!(
+            32,
+            state_store_stats
+                .shared_buffer_cur_size
+                .load(Ordering::SeqCst)
+        );
+        assert_eq!(0, state_store_stats.write_shared_buffer_sync_counts.get());
+
+        // ingest 16B batch
+        let mut batch2 = vec![
+            (Bytes::from("cccc"), Some(Bytes::from("3333"))),
+            (Bytes::from("dddd"), Some(Bytes::from("4444"))),
+        ];
+        batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+        mon_store.ingest_batch(batch2, epoch).await.unwrap();
+
+        // shared buffer threshold size have been reached
+        // and sync worker should have been triggered
+        assert_eq!(
+            0,
+            state_store_stats
+                .shared_buffer_cur_size
+                .load(Ordering::SeqCst)
+        );
+        assert_eq!(1, state_store_stats.write_shared_buffer_sync_counts.get());
+
+        epoch += 1;
+
+        // ingest 8B and trigger a sync
+        let mut batch3 = vec![(Bytes::from("eeee"), Some(Bytes::from("5555")))];
+        batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+        mon_store.ingest_batch(batch3, epoch).await.unwrap();
+
+        assert_eq!(
+            16,
+            state_store_stats
+                .shared_buffer_cur_size
+                .load(Ordering::SeqCst)
+        );
+        assert_eq!(1, state_store_stats.write_shared_buffer_sync_counts.get());
+
+        // triger a sync
+        mon_store.sync(Some(epoch)).await.unwrap();
+
+        assert_eq!(
+            0,
+            state_store_stats
+                .shared_buffer_cur_size
+                .load(Ordering::SeqCst)
+        );
+        assert_eq!(2, state_store_stats.write_shared_buffer_sync_counts.get());
+
+        drop(state_store_ref); // drop strong ref
+
+        if let Some(join_handle) = join_handle {
+            join_handle.await.unwrap().unwrap();
+        }
+    }
 }
 
 async fn count_iter(iter: &mut UserIterator<'_>) -> usize {

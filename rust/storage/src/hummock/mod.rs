@@ -346,7 +346,7 @@ impl HummockStorage {
         &self,
         kv_pairs: impl Iterator<Item = (Bytes, HummockValue<Bytes>)>,
         epoch: u64,
-    ) -> HummockResult<()> {
+    ) -> HummockResult<u64> {
         let batch = kv_pairs
             .map(|(key, value)| {
                 (
@@ -355,12 +355,15 @@ impl HummockStorage {
                 )
             })
             .collect_vec();
-        self.shared_buffer_manager.write_batch(batch, epoch)?;
+        let size = self.shared_buffer_manager.write_batch(batch, epoch)?; //?;
 
         if !self.options.async_checkpoint_enabled {
-            return self.shared_buffer_manager.sync(Some(epoch)).await;
+            let res = self.shared_buffer_manager.sync(Some(epoch)).await;
+            if let Err(e) = res {
+                return Err(e);
+            }
         }
-        Ok(())
+        Ok(size)
     }
 
     /// Replicate batch to shared buffer, without uploading to the storage backend.

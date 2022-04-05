@@ -20,6 +20,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_pb::hummock::SstableMeta;
+use risingwave_rpc_client::{MetaClient, MetaClientInner};
 
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::key::key_with_epoch;
@@ -30,6 +31,15 @@ use crate::hummock::{
     CachePolicy, HummockStorage, SSTableBuilder, SSTableBuilderOptions, Sstable, SstableStoreRef,
 };
 use crate::monitor::StateStoreMetrics;
+
+pub struct StorageMockMetaClient;
+
+impl MetaClientInner for StorageMockMetaClient {}
+
+pub fn mock_meta_client() -> MetaClient {
+    let mock_client = StorageMockMetaClient;
+    MetaClient::mock(mock_client)
+}
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {

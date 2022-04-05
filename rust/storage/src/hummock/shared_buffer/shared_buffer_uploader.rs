@@ -14,6 +14,7 @@
 //
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
@@ -103,6 +104,8 @@ impl SharedBufferUploader {
             None => return Ok(()),
         };
 
+        let sync_size: u64 = buffers.iter().map(|batch| batch.size).sum();
+
         // Compact buffers into SSTs
         let merge_iters = {
             let iters = buffers
@@ -128,6 +131,11 @@ impl SharedBufferUploader {
             u64::MAX,
         )
         .await?;
+
+        let shared_buff_prev_size = self.stats.shared_buffer_cur_size.fetch_sub(sync_size, Ordering::SeqCst);
+        println!("shared_buffer_uploader: shared_buff_prev_size {}", shared_buff_prev_size);
+        assert!(shared_buff_prev_size > 0);
+
 
         if tables.is_empty() {
             return Ok(());

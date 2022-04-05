@@ -36,7 +36,7 @@ enum StateStoreSyncMsg {
 
 /// Background worker for synchronizing state store to S3
 #[derive(Clone)]
-pub struct StateStoreSyncWorker {
+struct StateStoreSyncWorker {
     input_tx: mpsc::UnboundedSender<StateStoreSyncMsg>,
 }
 
@@ -56,7 +56,7 @@ impl StateStoreSyncWorker {
                         let timer = store.stats.write_shared_buffer_sync_time.start_timer();
 
                         if let Err(e) = store.inner().sync(None).await {
-                            panic!("Failed to sync state store based on threshold due to {}", e)
+                            panic!("Failed to sync state store based on threshold due to {}", e);
                         }
                         timer.observe_duration();
                     } else {
@@ -232,18 +232,9 @@ where
         Ok(result)
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
+    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<u64> {
         if kv_pairs.is_empty() {
-            return Ok(());
-        }
-
-        // check whther shared buffer watermark has been reached
-        let mut shared_buff_cur_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
-
-        // yield current task if reach threshold
-        while self.stats.shared_buffer_threshold_size <= shared_buff_cur_size {
-            yield_now().await;
-            shared_buff_cur_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
+            return Ok(0);
         }
 
         self.stats.write_batch_counts.inc();
@@ -251,20 +242,24 @@ where
             .write_batch_tuple_counts
             .inc_by(kv_pairs.len() as _);
 
-        let total_size = kv_pairs
-            .iter()
-            .map(|(k, v)| k.len() + v.as_ref().map(|v| v.len()).unwrap_or_default())
-            .sum::<usize>();
-
         let timer = self.stats.write_batch_shared_buffer_time.start_timer();
-        self.inner.ingest_batch(kv_pairs, epoch).await?;
+        let batch_size = self.inner.ingest_batch(kv_pairs, epoch).await?;
         timer.observe_duration();
 
-        self.stats.write_batch_size.observe(total_size as _);
-        self.stats
-            .shared_buffer_cur_size
-            .fetch_add(total_size as _, Ordering::SeqCst);
-        Ok(())
+        self.stats.write_batch_size.observe(batch_size as _);
+        let mut shared_buff_cur_size = (batch_size as u64)
+            + self
+                .stats
+                .shared_buffer_cur_size
+                .fetch_add(batch_size as _, Ordering::SeqCst);
+
+        // yield current task if threshold has been reached after ingest batch
+        while self.stats.shared_buffer_threshold_size <= shared_buff_cur_size {
+            yield_now().await;
+            shared_buff_cur_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
+        }
+
+        Ok(batch_size)
     }
 
     async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>

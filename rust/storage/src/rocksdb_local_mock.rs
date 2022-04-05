@@ -43,7 +43,7 @@ impl StateStore for RocksDBStateStore {
         &self,
         _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
         _epoch: u64,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         unimplemented!()
     }
 

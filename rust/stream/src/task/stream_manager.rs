@@ -170,7 +170,6 @@ impl StreamManager {
         rx.await.unwrap();
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
-        // todo: move this part to another tokio task
         dispatch_state_store!(self.state_store(), store, {
             match store.sync(Some(barrier.epoch.prev)).await {
                 Ok(_) => {}

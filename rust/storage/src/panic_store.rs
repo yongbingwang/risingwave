@@ -37,7 +37,7 @@ impl StateStore for PanicStateStore {
         &self,
         _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
         _epoch: u64,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         panic!("should not write the panic state store!");
     }
 

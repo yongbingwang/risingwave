@@ -140,6 +140,13 @@ where
             return Ok(0);
         }
 
+        let mut shared_buff_cur_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
+        // yield current task if threshold has been reached
+        while self.stats.shared_buffer_threshold_size <= shared_buff_cur_size {
+            yield_now().await;
+            shared_buff_cur_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
+        }
+
         self.stats.write_batch_counts.inc();
         self.stats
             .write_batch_tuple_counts
@@ -149,18 +156,9 @@ where
         let batch_size = self.inner.ingest_batch(kv_pairs, epoch).await?;
         timer.observe_duration();
 
+        log::debug!("ingested batch size: {}", batch_size);
         self.stats.write_batch_size.observe(batch_size as _);
-        let mut shared_buff_cur_size = (batch_size as u64)
-            + self
-                .stats
-                .shared_buffer_cur_size
-                .fetch_add(batch_size as _, Ordering::SeqCst);
-
-        // yield current task if threshold has been reached after ingest batch
-        while self.stats.shared_buffer_threshold_size <= shared_buff_cur_size {
-            yield_now().await;
-            shared_buff_cur_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
-        }
+        self.stats.shared_buffer_cur_size.fetch_add(batch_size as _, Ordering::SeqCst);
 
         Ok(batch_size)
     }

@@ -54,7 +54,6 @@ impl SharedBufferFlusher {
                     }
 
                     timer.observe_duration();
-                    log::info!("finished sync");
                 } else {
                     // wait a moment for executors to fill the shared buffer
                     time_interval.tick().await;

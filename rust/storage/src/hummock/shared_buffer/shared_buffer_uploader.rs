@@ -133,10 +133,8 @@ impl SharedBufferUploader {
         .await?;
 
         let shared_buff_prev_size = self.stats.shared_buffer_cur_size.fetch_sub(sync_size, Ordering::SeqCst);
-        // todo: remove this println
-        log::info!("shared_buff_prev_size {}, sync_size: {}", shared_buff_prev_size, sync_size);
+        log::debug!("shared_buff_prev_size {}, sync_size: {}", shared_buff_prev_size, sync_size);
         assert!(shared_buff_prev_size > 0);
-
 
         if tables.is_empty() {
             return Ok(());

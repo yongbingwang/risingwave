@@ -28,7 +28,7 @@ use crate::hummock::test_utils::default_config_for_test;
 use crate::hummock::HummockStateStore;
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::object::InMemObjectStore;
-use crate::{StateStore, StateStoreImpl};
+use crate::StateStore;
 
 #[tokio::test]
 async fn test_basic() {
@@ -188,8 +188,7 @@ async fn test_state_store_flusher() {
 
     let mon_store = MonitoredStateStore::new(HummockStateStore::new(hummock_storage), state_store_stats.clone());
 
-    let mut time_interval = tokio::time::interval(Duration::from_millis(100));
-    time_interval.tick().await;
+    let mut time_interval = tokio::time::interval(Duration::from_millis(50));
     let mut epoch: Epoch = 1;
 
     // ingest 16B batch
@@ -201,6 +200,8 @@ async fn test_state_store_flusher() {
     // Make sure the batch is sorted.
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     mon_store.ingest_batch(batch1, epoch).await.unwrap();
+
+    time_interval.tick().await;
 
     // check sync state store metrics
     // Note: epoch(8B) will be appended to keys, thus the ingested batch
@@ -218,6 +219,8 @@ async fn test_state_store_flusher() {
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     mon_store.ingest_batch(batch2, epoch).await.unwrap();
+
+    time_interval.tick().await;
 
     // shared buffer threshold size have been reached
     // and sync worker should have been triggered

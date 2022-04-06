@@ -14,6 +14,7 @@
 //
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 
@@ -162,7 +163,7 @@ async fn test_basic() {
 }
 
 #[tokio::test]
-async fn test_state_store_sync_worker() {
+async fn test_state_store_flusher() {
     let object_store = Arc::new(InMemObjectStore::new());
     let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
     let config = Arc::new(default_config_for_test());
@@ -185,90 +186,77 @@ async fn test_state_store_sync_worker() {
     .await
     .unwrap();
 
+    let mon_store = MonitoredStateStore::new(HummockStateStore::new(hummock_storage), state_store_stats.clone());
 
-    let state_store = StateStoreImpl::HummockStateStore(MonitoredStateStore::new(
-        HummockStateStore::new(hummock_storage),
-        state_store_stats.clone(),
-    ));
+    let mut time_interval = tokio::time::interval(Duration::from_millis(100));
+    time_interval.tick().await;
+    let mut epoch: Epoch = 1;
 
-    let mut join_handle = None;
-    if let StateStoreImpl::HummockStateStore(mut mon_store) = state_store.clone() {
-        let state_store_ref = Arc::new(state_store);
-        let handle = mon_store.start_sync_worker(state_store_ref.clone());
-        join_handle.replace(handle);
+    // ingest 16B batch
+    let mut batch1 = vec![
+        (Bytes::from("aaaa"), Some(Bytes::from("1111"))),
+        (Bytes::from("bbbb"), Some(Bytes::from("2222"))),
+    ];
 
-        let mut epoch: Epoch = 1;
+    // Make sure the batch is sorted.
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    mon_store.ingest_batch(batch1, epoch).await.unwrap();
 
-        // ingest 16B batch
-        let mut batch1 = vec![
-            (Bytes::from("aaaa"), Some(Bytes::from("1111"))),
-            (Bytes::from("bbbb"), Some(Bytes::from("2222"))),
-        ];
+    // check sync state store metrics
+    // Note: epoch(8B) will be appended to keys, thus the ingested batch
+    // cost additional 16 in the shared buffer that is 32B in total.
+    assert_eq!(
+        32,
+        state_store_stats.shared_buffer_cur_size.load(Ordering::SeqCst)
+    );
+    assert_eq!(0, state_store_stats.write_shared_buffer_sync_counts.get());
 
-        // Make sure the batch is sorted.
-        batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        mon_store.ingest_batch(batch1, epoch).await.unwrap();
+    // ingest 16B batch
+    let mut batch2 = vec![
+        (Bytes::from("cccc"), Some(Bytes::from("3333"))),
+        (Bytes::from("dddd"), Some(Bytes::from("4444"))),
+    ];
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    mon_store.ingest_batch(batch2, epoch).await.unwrap();
 
-        // epoch(8B) will be appended to keys, thus the ingested batch cost 32B in the shared buffer
-        // check sync state store metrics
-        assert_eq!(
-            32,
-            state_store_stats
-                .shared_buffer_cur_size
-                .load(Ordering::SeqCst)
-        );
-        assert_eq!(0, state_store_stats.write_shared_buffer_sync_counts.get());
+    // shared buffer threshold size have been reached
+    // and sync worker should have been triggered
+    assert_eq!(
+        0,
+        state_store_stats
+            .shared_buffer_cur_size
+            .load(Ordering::SeqCst)
+    );
+    assert_eq!(1, state_store_stats.write_shared_buffer_sync_counts.get());
 
-        // ingest 16B batch
-        let mut batch2 = vec![
-            (Bytes::from("cccc"), Some(Bytes::from("3333"))),
-            (Bytes::from("dddd"), Some(Bytes::from("4444"))),
-        ];
-        batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        mon_store.ingest_batch(batch2, epoch).await.unwrap();
+    epoch += 1;
 
-        // shared buffer threshold size have been reached
-        // and sync worker should have been triggered
-        assert_eq!(
-            0,
-            state_store_stats
-                .shared_buffer_cur_size
-                .load(Ordering::SeqCst)
-        );
-        assert_eq!(1, state_store_stats.write_shared_buffer_sync_counts.get());
+    // ingest 8B and trigger a sync
+    let mut batch3 = vec![(Bytes::from("eeee"), Some(Bytes::from("5555")))];
+    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    mon_store.ingest_batch(batch3, epoch).await.unwrap();
 
-        epoch += 1;
+    // 16B in total with 8B epoch appended to the key
+    assert_eq!(
+        16,
+        state_store_stats
+            .shared_buffer_cur_size
+            .load(Ordering::SeqCst)
+    );
+    assert_eq!(1, state_store_stats.write_shared_buffer_sync_counts.get());
 
-        // ingest 8B and trigger a sync
-        let mut batch3 = vec![(Bytes::from("eeee"), Some(Bytes::from("5555")))];
-        batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        mon_store.ingest_batch(batch3, epoch).await.unwrap();
+    // triger a sync
+    mon_store.sync(Some(epoch)).await.unwrap();
 
-        assert_eq!(
-            16,
-            state_store_stats
-                .shared_buffer_cur_size
-                .load(Ordering::SeqCst)
-        );
-        assert_eq!(1, state_store_stats.write_shared_buffer_sync_counts.get());
+    assert_eq!(
+        0,
+        state_store_stats
+            .shared_buffer_cur_size
+            .load(Ordering::SeqCst)
+    );
+    assert_eq!(2, state_store_stats.write_shared_buffer_sync_counts.get());
 
-        // triger a sync
-        mon_store.sync(Some(epoch)).await.unwrap();
 
-        assert_eq!(
-            0,
-            state_store_stats
-                .shared_buffer_cur_size
-                .load(Ordering::SeqCst)
-        );
-        assert_eq!(2, state_store_stats.write_shared_buffer_sync_counts.get());
-
-        drop(state_store_ref); // drop strong ref
-
-        if let Some(join_handle) = join_handle {
-            join_handle.await.unwrap().unwrap();
-        }
-    }
 }
 
 async fn count_iter(iter: &mut UserIterator<'_>) -> usize {

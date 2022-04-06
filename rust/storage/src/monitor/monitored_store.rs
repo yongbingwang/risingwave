@@ -14,128 +14,31 @@
 //
 use std::ops::RangeBounds;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_common::error::Result;
-use tokio::sync::{mpsc, oneshot};
-use tokio::task::{yield_now, JoinHandle};
+use tokio::task::yield_now;
 
 use super::StateStoreMetrics;
-use crate::hummock::key::Epoch;
-use crate::hummock::HummockError;
-use crate::{dispatch_state_store, StateStore, StateStoreImpl, StateStoreIter};
-
-#[derive(Debug)]
-enum StateStoreSyncMsg {
-    Sync(Option<Epoch>, oneshot::Sender<Result<()>>),
-}
-
-/// Background worker for synchronizing state store to S3
-#[derive(Clone)]
-struct StateStoreSyncWorker {
-    input_tx: mpsc::UnboundedSender<StateStoreSyncMsg>,
-}
-
-impl StateStoreSyncWorker {
-    pub fn new(state_store_impl: Weak<StateStoreImpl>) -> (Self, JoinHandle<Result<()>>) {
-        let (input_tx, mut input_rx) = mpsc::unbounded_channel();
-
-        let join_handle = tokio::spawn(async move {
-            let mut time_interval = tokio::time::interval(Duration::from_millis(50));
-            while let Some(state_store) = state_store_impl.upgrade() {
-                // #1 threshold-based sync
-                dispatch_state_store!(state_store.as_ref(), store, {
-                    let shared_buff_cur_size =
-                        store.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
-                    if store.stats.shared_buffer_threshold_size <= shared_buff_cur_size {
-                        store.stats.write_shared_buffer_sync_counts.inc();
-                        let timer = store.stats.write_shared_buffer_sync_time.start_timer();
-
-                        if let Err(e) = store.inner().sync(None).await {
-                            panic!("Failed to sync state store based on threshold due to {}", e);
-                        }
-                        timer.observe_duration();
-                    } else {
-                        // wait a moment for executors to fill the shared buffer
-                        time_interval.tick().await;
-                    }
-
-                    // #2 message-driven sync
-                    match input_rx.try_recv() {
-                        Ok(StateStoreSyncMsg::Sync(epoch, notifier_tx)) => {
-                            store.stats.write_shared_buffer_sync_counts.inc();
-                            let timer = store.stats.write_shared_buffer_sync_time.start_timer();
-                            if let Err(e) = store.inner().sync(epoch).await {
-                                panic!(
-                                    "Failed to sync state store based of epoch {:?} due to {}",
-                                    epoch, e
-                                )
-                            }
-
-                            timer.observe_duration();
-                            notifier_tx.send(Ok(())).map_err(|_| {
-                                HummockError::shared_buffer_error(
-                                    "Failed to notify state store sync due to send drop",
-                                )
-                            })?;
-                        }
-                        Err(mpsc::error::TryRecvError::Disconnected) => {
-                            break; // exit
-                        }
-                        Err(mpsc::error::TryRecvError::Empty) => {} // do nothing
-                    }
-                })
-            }
-            Ok(())
-        });
-
-        (Self { input_tx }, join_handle)
-    }
-
-    pub async fn do_sync(&self, epoch: Option<Epoch>) -> Result<()> {
-        let (notifier_tx, notifier_rx) = oneshot::channel();
-        self.input_tx
-            .send(StateStoreSyncMsg::Sync(epoch, notifier_tx))
-            .unwrap();
-        notifier_rx.await.unwrap()
-    }
-}
+use crate::{StateStore, StateStoreIter};
 
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
     inner: S,
+
     stats: Arc<StateStoreMetrics>,
-    sync_worker: Option<StateStoreSyncWorker>,
 }
 
-impl<S> MonitoredStateStore<S>
-where
-    S: StateStore,
-{
+impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
-        Self {
-            inner,
-            stats,
-            sync_worker: None,
-        }
+        Self { inner, stats }
     }
     pub fn inner(&self) -> &S {
         &self.inner
-    }
-
-    pub fn start_sync_worker(
-        &mut self,
-        state_store_impl: Arc<StateStoreImpl>,
-    ) -> JoinHandle<Result<()>> {
-        let (sync_worker, join_handle) =
-            StateStoreSyncWorker::new(Arc::downgrade(&state_store_impl));
-        self.sync_worker.replace(sync_worker);
-        join_handle
     }
 }
 
@@ -284,9 +187,10 @@ where
     }
 
     async fn sync(&self, epoch: Option<u64>) -> Result<()> {
-        if let Some(worker) = &self.sync_worker {
-            worker.do_sync(epoch).await?
-        }
+        self.stats.write_shared_buffer_sync_counts.inc();
+        let timer = self.stats.write_shared_buffer_sync_time.start_timer();
+        self.inner.sync(epoch).await?;
+        timer.observe_duration();
         Ok(())
     }
 

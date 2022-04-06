@@ -67,6 +67,7 @@ use super::monitor::StateStoreMetrics;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::shared_buffer::shared_buffer_flusher::SharedBufferFlusher;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::utils::validate_epoch;
 
@@ -129,6 +130,10 @@ impl HummockStorage {
             stats.clone(),
             hummock_meta_client.clone(),
         ));
+
+        let shared_buffer_flusher =
+            SharedBufferFlusher::new(stats, Arc::downgrade(&shared_buffer_manager));
+        tokio::spawn(shared_buffer_flusher.run());
 
         LocalVersionManager::start_workers(
             local_version_manager.clone(),
@@ -355,7 +360,7 @@ impl HummockStorage {
                 )
             })
             .collect_vec();
-        let size = self.shared_buffer_manager.write_batch(batch, epoch)?; //?;
+        let size = self.shared_buffer_manager.write_batch(batch, epoch)?;
 
         if !self.options.async_checkpoint_enabled {
             let res = self.shared_buffer_manager.sync(Some(epoch)).await;

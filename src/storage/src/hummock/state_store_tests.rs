@@ -20,7 +20,8 @@ use super::{HummockStateStoreIter, HummockStorage, StateStore};
 use risingwave_rpc_client::HummockMetaClient;
 use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::MockHummockMetaClient;
 use crate::hummock::test_utils::default_config_for_test;
 use crate::monitor::StateStoreMetrics;
 use crate::object::InMemObjectStore;
@@ -32,9 +33,11 @@ async fn test_basic() {
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
     let hummock_options = Arc::new(default_config_for_test());
-    let meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
-        MockHummockMetaService::new(),
-    )));
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) = setup_compute_env(8080).await;
+    let meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
@@ -183,9 +186,11 @@ async fn test_reload_storage() {
     let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
     let hummock_options = Arc::new(default_config_for_test());
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
-        MockHummockMetaService::new(),
-    )));
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) = setup_compute_env(8080).await;
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
 
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,

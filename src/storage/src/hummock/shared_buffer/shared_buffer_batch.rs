@@ -137,34 +137,49 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         // Perform binary search on user key because the items in SharedBufferBatch is ordered by
         // user key.
-        self.current_idx = match self
+        let partition_point = self
             .inner
-            .binary_search_by(|probe| key::user_key(&probe.0).cmp(key::user_key(key)))
-        {
-            Ok(i) => {
-                let current_key = &self.inner[i].0;
-                match DIRECTION {
-                    FORWARD if key::get_epoch(current_key) > key::get_epoch(key) => i + 1,
-                    BACKWARD if key::get_epoch(current_key) < key::get_epoch(key) => self.inner.len() - seek_idx - 1,
-                    _ => unreachable!(),
-                };
-                // Move onto the next item if key epoch > seek epoch
-                if key::get_epoch(self.key()) > key::get_epoch(key) {
-                    println!(
-                        "epoch {:?} read epoch {:?}",
-                        key::get_epoch(self.key()),
-                        key::get_epoch(key)
-                    );
-                    self.current_idx += 1
+            .binary_search_by(|probe| key::user_key(&probe.0).cmp(key::user_key(key)));
+        let seek_key_epoch = key::get_epoch(key);
+        match DIRECTION  {
+            FORWARD => {
+                match partition_point {
+                    Ok(i) => {
+                        let current_key = &self.inner[i].0;
+                        if current_key > 
+                    },
+                    Err(i) => todo!(),
                 }
-            }
-            Err(i) => i,
-        };
-        self.current_idx = match DIRECTION {
-            FORWARD => seek_idx,
-            BACKWARD => self.inner.len() - seek_idx - 1,
-            _ => unreachable!(),
-        };
+
+            },
+            BACKWARD => {
+
+            },
+            _ => unreachable!()
+            // Ok(i) => {
+            //     let current_key = &self.inner[i].0;
+            //     match DIRECTION {
+            //         FORWARD if key::get_epoch(current_key) > key::get_epoch(key) => i + 1,
+            //         BACKWARD if key::get_epoch(current_key) < key::get_epoch(key) => self.inner.len() - seek_idx - 1,
+            //         _ => unreachable!(),
+            //     };
+            //     // Move onto the next item if key epoch > seek epoch
+            //     if key::get_epoch(self.key()) > key::get_epoch(key) {
+            //         println!(
+            //             "epoch {:?} read epoch {:?}",
+            //             key::get_epoch(self.key()),
+            //             key::get_epoch(key)
+            //         );
+            //         self.current_idx += 1
+            //     }
+            // }
+            // Err(i) => i,
+        }
+        // self.current_idx = match DIRECTION {
+        //     FORWARD => seek_idx,
+        //     BACKWARD => self.inner.len() - seek_idx - 1,
+        //     _ => unreachable!(),
+        // };
 
         println!("seek key {:?} idx {}", key, self.current_idx);
 

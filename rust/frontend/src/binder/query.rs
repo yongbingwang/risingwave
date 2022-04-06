@@ -58,6 +58,7 @@ impl Binder {
     }
 
     fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
+        dbg!(&query);
         let limit = query.get_limit_value();
         let offset = query.get_offset_value();
         let body = self.bind_set_expr(query.body)?;

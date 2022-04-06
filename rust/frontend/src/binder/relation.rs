@@ -22,8 +22,9 @@ use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::plan::JoinType;
 use risingwave_sqlparser::ast::{
-    JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
+    JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins, FunctionArg, TableAlias, FunctionArgExpr,
 };
+use risingwave_sqlparser::ast::FunctionArg::*;
 
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, UNNAMED_SUBQUERY};
@@ -38,6 +39,7 @@ pub enum Relation {
     BaseTable(Box<BoundBaseTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
+    TableFunction(Box<BoundTableFunction>),
 }
 
 #[derive(Debug)]
@@ -65,6 +67,13 @@ pub struct BoundTableSource {
     pub name: String,       // explain-only
     pub source_id: TableId, // TODO: refactor to source id
     pub columns: Vec<ColumnDesc>,
+}
+
+#[derive(Debug)]
+pub struct BoundTableFunction {
+    pub name: String,       
+    pub args: Vec<ExprImpl>, 
+    pub alias: Option<String>,
 }
 
 impl Binder {
@@ -154,6 +163,9 @@ impl Binder {
                     )))
                 }
             }
+            TableFactor::TableFunction { name,args,alias, .. } => {
+                Ok(Relation::TableFunction(Box::new(self.bind_table_function(name,args,alias)?)))
+            }
             _ => Err(ErrorCode::NotImplementedError(format!(
                 "unsupported table factor {:?}",
                 table_factor
@@ -176,6 +188,31 @@ impl Binder {
             .unwrap_or_else(|| DEFAULT_SCHEMA_NAME.into());
 
         Ok((schema_name, table_name))
+    }
+
+    pub(super) fn bind_table_function(&mut self, name: ObjectName,args: Vec<FunctionArg>,alias: Option<TableAlias>) -> Result<BoundTableFunction> {
+        let name=name.0.get(0).unwrap().value.clone();
+        let args= args
+        .into_iter()
+        .map(|arg| self.bind_func_arg_expr(match arg{
+            Named{name:_,arg}=>{arg},
+            Unnamed(arg)=>{arg},
+        }))
+        .collect::<Result<_>>()?;
+        let alias=alias.map(|value|value.name.value);
+        Ok(BoundTableFunction {
+            name,
+            args,
+            alias,
+        })
+    }
+
+    fn bind_func_arg_expr(&mut self,arg: FunctionArgExpr)->Result<ExprImpl>{
+        match arg{
+            FunctionArgExpr::Expr(expr)=>Ok(self.bind_expr(expr)?),
+            _=>Err(ErrorCode::InternalError("function arg should be expr".into()).into())
+        }
+        
     }
 
     pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {

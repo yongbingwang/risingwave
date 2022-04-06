@@ -324,9 +324,10 @@ pub enum TableFactor {
         subquery: Box<Query>,
         alias: Option<TableAlias>,
     },
-    /// `TABLE(<expr>)[ AS <alias> ]`
+    /// <name>(<arg>, ...)[ AS <alias> ]
     TableFunction {
-        expr: Expr,
+        name: ObjectName,
+        args: Vec<FunctionArg>,
         alias: Option<TableAlias>,
     },
     /// Represents a parenthesized table factor. The SQL spec only allows a
@@ -365,8 +366,8 @@ impl fmt::Display for TableFactor {
                 }
                 Ok(())
             }
-            TableFactor::TableFunction { expr, alias } => {
-                write!(f, "TABLE({})", expr)?;
+            TableFactor::TableFunction { name, args, alias } => {
+                write!(f, "{}({})", name,display_comma_separated(&args))?;
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }

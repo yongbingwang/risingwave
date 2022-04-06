@@ -123,8 +123,10 @@ impl Parser {
 
     /// Parse a SQL statement and produce an Abstract Syntax Tree (AST)
     pub fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
+        dbg!(&sql);
         let mut tokenizer = Tokenizer::new(sql);
         let tokens = tokenizer.tokenize()?;
+        dbg!(&tokens);
         let mut parser = Parser::new(tokens);
         let mut stmts = Vec::new();
         let mut expecting_statement_delimiter = false;
@@ -143,9 +145,11 @@ impl Parser {
             }
 
             let statement = parser.parse_statement()?;
+            dbg!(&statement);
             stmts.push(statement);
             expecting_statement_delimiter = true;
         }
+        dbg!(&stmts);
         Ok(stmts)
     }
 
@@ -2564,6 +2568,8 @@ impl Parser {
             };
             joins.push(join);
         }
+        dbg!(&relation);
+        dbg!(&joins);
         Ok(TableWithJoins { relation, joins })
     }
 
@@ -2575,7 +2581,28 @@ impl Parser {
                 self.expected("subquery after LATERAL", self.peek_token())?;
             }
             self.parse_derived_table_factor(Lateral)
-        } else if self.consume_token(&Token::LParen) {
+        } else if self.parse_keyword(Keyword::GENERATE_SERIES) {
+            if !self.consume_token(&Token::LParen){
+                self.expected("LParen after generate_series", self.peek_token())?;
+            };
+            let args=self.parse_optional_args()?;
+            // parse generate_series()
+            // self.expect_token(&Token::RParen)?;
+            // dbg!(&args);
+            let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
+            // dbg!(&alias);
+            // let columns = self.parse_parenthesized_column_list(Optional)?;
+            // let columns = self.parse_tuple();
+            // dbg!(&columns);
+            // // self.expect_token(&Token::RParen)?;
+            // let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
+            // dbg!(&alias);
+            // todo!();
+            //Ident::with_quote('\'', s)
+            let name= ObjectName(vec![Ident::new("generate_series".to_string())]);
+            Ok(TableFactor::TableFunction {name ,args, alias })
+        } 
+        else if self.consume_token(&Token::LParen) {
             // A left paren introduces either a derived table (i.e., a subquery)
             // or a nested join. It's nearly impossible to determine ahead of
             // time which it is... so we just try to parse both.

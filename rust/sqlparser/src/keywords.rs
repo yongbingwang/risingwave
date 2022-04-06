@@ -218,6 +218,7 @@ define_keywords!(
     FULL,
     FUNCTION,
     FUSION,
+    GENERATE_SERIES,
     GET,
     GLOBAL,
     GRANT,

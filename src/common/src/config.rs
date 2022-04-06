@@ -118,6 +118,10 @@ pub struct StorageConfig {
     /// Capacity of sstable meta cache.
     #[serde(default = "default::meta_cache_capacity")]
     pub meta_cache_capacity: usize,
+
+    /// Whether to upload to s3 in a streaming manner
+    #[serde(default = "default::stream_upload_s3_enabled")]
+    pub stream_upload_s3_enabled: bool,
 }
 
 impl Default for StorageConfig {
@@ -198,6 +202,11 @@ mod default {
     pub fn meta_cache_capacity() -> usize {
         // 64 MB
         67108864
+    }
+
+    pub fn stream_upload_s3_enabled() -> bool {
+        // TODO: may want to set default to true when the feature is stable
+        false
     }
 }
 

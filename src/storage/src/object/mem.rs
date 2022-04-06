@@ -16,6 +16,8 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use futures::future::try_join_all;
+use futures::stream::BoxStream;
+use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::InternalError;
@@ -36,6 +38,14 @@ impl ObjectStore for InMemObjectStore {
         ensure!(!obj.is_empty());
         self.objects.lock().await.insert(path.into(), obj);
         Ok(())
+    }
+
+    async fn upload_stream(&self, path: &str, mut stream: BoxStream<'static, Bytes>) -> Result<()> {
+        let mut payload = Vec::new();
+        while let Some(bytes) = stream.next().await {
+            payload.extend(bytes);
+        }
+        self.upload(path, Bytes::from(payload)).await
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> Result<Bytes> {
@@ -92,7 +102,11 @@ fn find_block(obj: &Bytes, block: BlockLocation) -> Result<Bytes> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use bytes::Bytes;
+    use tokio::sync::mpsc::channel;
+    use tokio_stream::wrappers::ReceiverStream;
 
     use super::*;
 
@@ -136,5 +150,26 @@ mod tests {
 
         let metadata = obj_store.metadata("/abc").await.unwrap();
         assert_eq!(metadata.total_size, 6);
+    }
+
+    #[tokio::test]
+    async fn test_channel_receiver_stream() {
+        let (tx, rx) = channel(1024);
+        let path = "path";
+        let in_mem_object_store = Arc::new(InMemObjectStore::new());
+        let join_handle = tokio::spawn({
+            let object_store = in_mem_object_store.clone();
+            async move {
+                object_store
+                    .upload_stream(path, ReceiverStream::new(rx).boxed())
+                    .await
+            }
+        });
+        let data = Bytes::from("hello stream".as_bytes());
+        tx.send(data.clone()).await.unwrap();
+        drop(tx);
+        join_handle.await.unwrap().unwrap();
+        let object_store_data = in_mem_object_store.read(path, None).await.unwrap();
+        assert_eq!(data, object_store_data);
     }
 }

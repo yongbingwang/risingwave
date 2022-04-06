@@ -15,6 +15,9 @@
 use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
 use futures::future::try_join_all;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use hyper::Body;
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{BoxedError, ErrorCode, Result, RwError};
@@ -39,6 +42,18 @@ impl ObjectStore for S3ObjectStore {
             .put_object()
             .bucket(&self.bucket)
             .body(SdkBody::from(obj).into())
+            .key(path)
+            .send()
+            .await
+            .map_err(err)?;
+        Ok(())
+    }
+
+    async fn upload_stream(&self, path: &str, stream: BoxStream<'static, Bytes>) -> Result<()> {
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .body(SdkBody::from(Body::wrap_stream(stream.map(Result::Ok))).into())
             .key(path)
             .send()
             .await

@@ -19,12 +19,13 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use futures::Future;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::RwError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::{
     CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
+use tokio_stream::wrappers::ReceiverStream;
 
 use super::iterator::{BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
@@ -33,10 +34,12 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::sstable_store::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
-    HummockMetaClient, HummockResult, HummockStorage, LocalVersionManager, SSTableBuilder,
-    SSTableIterator, Sstable,
+    HummockMetaClient, HummockResult, LocalVersionManager, SSTableBuilder, SSTableIterator, Sstable,
 };
 use crate::hummock::vacuum::Vacuum;
+use crate::hummock::{
+    ConcurrentUploadSstableWriter, InMemSstableWriter, SSTableBuilderOptions, SstableWriter,
+};
 use crate::monitor::StateStoreMetrics;
 
 /// A `CompactorContext` describes the context of a compactor.
@@ -86,7 +89,7 @@ impl Compactor {
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
         iter: MergeIterator<'_>,
-    ) -> HummockResult<Vec<Sstable>> {
+    ) -> Result<Vec<Sstable>> {
         // Local memory compaction looks at all key ranges.
         let key_range = KeyRange::inf();
         let compact_task = CompactTask {
@@ -203,11 +206,12 @@ impl Compactor {
     }
 
     /// Compact the given key range and merge iterator.
+    /// Upon a successful return, the built SSTs are already uploaded to object store.
     async fn compact_key_range(
         &self,
         split_index: usize,
         iter: MergeIterator<'_>,
-    ) -> HummockResult<(usize, Vec<Sstable>)> {
+    ) -> Result<(usize, Vec<Sstable>)> {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
             left: Bytes::copy_from_slice(split.get_left()),
@@ -215,58 +219,147 @@ impl Compactor {
             inf: split.get_inf(),
         };
 
-        // NOTICE: should be user_key overlap, NOT full_key overlap!
-        let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let table_id = self.context.hummock_meta_client.get_new_table_id().await?;
-            let builder = HummockStorage::get_builder(&self.context.options);
-            Ok((table_id, builder))
-        });
+        // TODO: make this configurable or pass from a parameter
+        let add_compact_block_to_cache = true;
 
-        // Monitor time cost building shared buffer to SSTs.
-        let build_l0_sst_timer = if self.context.is_share_buffer_compact {
-            Some(self.context.stats.write_build_l0_sst_duration.start_timer())
-        } else {
-            None
-        };
-        Compactor::compact_and_build_sst(
-            &mut builder,
-            kr,
-            iter,
-            !self.compact_task.is_target_ultimate_and_leveling,
-            self.compact_task.watermark,
-        )
-        .await?;
-        if let Some(timer) = build_l0_sst_timer {
-            timer.observe_duration();
-        }
+        // TODO: refactor and extract some common logic within the two branches
+        if self.context.options.stream_upload_s3_enabled {
+            let mut builder = CapacitySplitTableBuilder::new(|| {
+                let context = self.context.clone();
+                async {
+                    let table_id = self.context.hummock_meta_client.get_new_table_id().await?;
+                    // TODO: move the channel size to config
+                    let (tx, rx) = tokio::sync::mpsc::channel(1024);
+                    let upload_join_handle = tokio::spawn(async move {
+                        context
+                            .sstable_store
+                            .put_sst_data_stream(table_id, ReceiverStream::new(rx).boxed())
+                            .await
+                    });
+                    let builder = SSTableBuilder::new(
+                        SSTableBuilderOptions::from_storage_config(&self.context.options),
+                        ConcurrentUploadSstableWriter::new(tx, upload_join_handle),
+                        add_compact_block_to_cache,
+                    );
+                    Ok((table_id, builder))
+                }
+            });
 
-        // Seal.
-        builder.seal_current();
-
-        let mut ssts: Vec<Sstable> = Vec::new();
-        ssts.reserve(builder.len());
-        // TODO: decide upload concurrency
-        for (table_id, data, meta) in builder.finish() {
-            let sst = Sstable { id: table_id, meta };
-            let len = self
-                .context
-                .sstable_store
-                .put(&sst, data, super::CachePolicy::Fill)
-                .await?;
-
-            if self.context.is_share_buffer_compact {
-                self.context
-                    .stats
-                    .shared_buffer_to_sstable_size
-                    .observe(len as _);
+            // Monitor time cost building shared buffer to SSTs.
+            let build_l0_sst_timer = if self.context.is_share_buffer_compact {
+                Some(self.context.stats.write_build_l0_sst_duration.start_timer())
             } else {
-                self.context.stats.compaction_upload_sst_counts.inc();
+                None
+            };
+            Compactor::compact_and_build_sst(
+                &mut builder,
+                kr,
+                iter,
+                !self.compact_task.is_target_ultimate_and_leveling,
+                self.compact_task.watermark,
+            )
+            .await?;
+            if let Some(timer) = build_l0_sst_timer {
+                timer.observe_duration();
             }
 
-            ssts.push(sst);
-        }
+            let mut ssts: Vec<Sstable> = Vec::new();
+            ssts.reserve(builder.len());
+            for (table_id, output) in builder.finish().await? {
+                let sst = Sstable {
+                    id: table_id,
+                    meta: output.meta,
+                };
+                self.context.sstable_store.put_meta(&sst).await?;
+                let upload_join_handle = output.writer_output;
+                upload_join_handle.await??;
 
-        Ok((split_index, ssts))
+                if add_compact_block_to_cache {
+                    let block_data = output.block_bytes.expect("when `add_compact_block_to_cache` flag is set, we should be able to collect the block data");
+                    assert_eq!(
+                        sst.meta.block_metas.len(),
+                        block_data.len(),
+                        "block meta count should be the same as block data"
+                    );
+                    for (block_idx, block_data) in block_data.into_iter().enumerate() {
+                        self.context
+                            .sstable_store
+                            .add_block_cache(table_id, block_idx as u64, block_data)
+                            .await?;
+                    }
+                }
+
+                if self.context.is_share_buffer_compact {
+                    self.context
+                        .stats
+                        .shared_buffer_to_sstable_size
+                        .observe(sst.meta.estimated_size as _);
+                } else {
+                    self.context.stats.compaction_upload_sst_counts.inc();
+                }
+
+                ssts.push(sst);
+            }
+
+            Ok((split_index, ssts))
+        } else {
+            // NOTICE: should be user_key overlap, NOT full_key overlap!
+            let mut builder = CapacitySplitTableBuilder::new(|| async {
+                let table_id = self.context.hummock_meta_client.get_new_table_id().await?;
+                let builder = SSTableBuilder::new(
+                    SSTableBuilderOptions::from_storage_config(&self.context.options),
+                    InMemSstableWriter::new(self.context.options.sstable_size as usize),
+                    add_compact_block_to_cache,
+                );
+                Ok((table_id, builder))
+            });
+
+            // Monitor time cost building shared buffer to SSTs.
+            let build_l0_sst_timer = if self.context.is_share_buffer_compact {
+                Some(self.context.stats.write_build_l0_sst_duration.start_timer())
+            } else {
+                None
+            };
+            Compactor::compact_and_build_sst(
+                &mut builder,
+                kr,
+                iter,
+                !self.compact_task.is_target_ultimate_and_leveling,
+                self.compact_task.watermark,
+            )
+            .await?;
+            if let Some(timer) = build_l0_sst_timer {
+                timer.observe_duration();
+            }
+
+            let mut ssts: Vec<Sstable> = Vec::new();
+            ssts.reserve(builder.len());
+            // TODO: decide upload concurrency
+            for (table_id, output) in builder.finish().await? {
+                let sst = Sstable {
+                    id: table_id,
+                    meta: output.meta,
+                };
+                let len = self
+                    .context
+                    .sstable_store
+                    .put(&sst, output.writer_output, super::CachePolicy::Fill)
+                    .await?;
+
+                if self.context.is_share_buffer_compact {
+                    self.context
+                        .stats
+                        .shared_buffer_to_sstable_size
+                        .observe(len as _);
+                } else {
+                    self.context.stats.compaction_upload_sst_counts.inc();
+                }
+
+                ssts.push(sst);
+            }
+
+            Ok((split_index, ssts))
+        }
     }
 
     /// Build the merge iterator based on the given input ssts.
@@ -437,16 +530,17 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    async fn compact_and_build_sst<B, F>(
-        sst_builder: &mut CapacitySplitTableBuilder<B>,
+    async fn compact_and_build_sst<B, F, W, WO>(
+        sst_builder: &mut CapacitySplitTableBuilder<B, W, WO>,
         kr: KeyRange,
         mut iter: MergeIterator<'_>,
         has_user_key_overlap: bool,
         watermark: Epoch,
-    ) -> HummockResult<()>
+    ) -> Result<()>
     where
         B: FnMut() -> F,
-        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+        F: Future<Output = HummockResult<(u64, SSTableBuilder<W, WO>)>>,
+        W: SstableWriter<WO>,
     {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;

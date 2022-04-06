@@ -26,7 +26,7 @@ use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::{BoxedHummockIterator, MergeIterator};
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
+use crate::hummock::{HummockError, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
 #[derive(Debug)]
@@ -34,7 +34,7 @@ pub struct SyncItem {
     /// Epoch to sync. None means syncing all epochs.
     pub(super) epoch: Option<u64>,
     /// Notifier to notify on sync finishes
-    pub(super) notifier: Option<tokio::sync::oneshot::Sender<HummockResult<()>>>,
+    pub(super) notifier: Option<tokio::sync::oneshot::Sender<Result<()>>>,
 }
 
 #[derive(Debug)]
@@ -90,7 +90,7 @@ impl SharedBufferUploader {
     }
 
     /// Uploads buffer batches to S3.
-    async fn sync(&mut self, epoch: u64) -> HummockResult<()> {
+    async fn sync(&mut self, epoch: u64) -> Result<()> {
         if let Some(detector) = &self.write_conflict_detector {
             detector.archive_epoch(epoch);
         }

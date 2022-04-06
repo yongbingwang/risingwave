@@ -16,14 +16,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::executor::block_on;
 use itertools::Itertools;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 use risingwave_storage::hummock::key::key_with_epoch;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CompressionAlgorithm, HummockContextId, HummockEpoch, HummockSSTableId, SSTableBuilder,
-    SSTableBuilderOptions, SstableMeta,
+    CompressionAlgorithm, HummockContextId, HummockEpoch, HummockSSTableId, InMemSstableWriter,
+    SSTableBuilder, SSTableBuilderOptions, SstableMeta,
 };
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
@@ -104,16 +105,18 @@ pub fn generate_test_tables(
     let mut sst_info = vec![];
     let mut sst_data = vec![];
     for (i, table_id) in table_ids.into_iter().enumerate() {
-        let mut b = SSTableBuilder::new(opt.clone());
+        let writer = InMemSstableWriter::new(opt.capacity);
+        let mut b = SSTableBuilder::new(opt.clone(), writer, true);
         let kv_pairs = vec![
             (i + 1, HummockValue::put(b"test".as_slice())),
             ((i + 1) * 10, HummockValue::put(b"test".as_slice())),
         ];
         for kv in kv_pairs {
-            b.add(&iterator_test_key_of_epoch(table_id, kv.0, epoch), kv.1);
+            block_on(b.add(&iterator_test_key_of_epoch(table_id, kv.0, epoch), kv.1)).unwrap();
         }
-        let (data, meta) = b.finish();
-        sst_data.push((meta.clone(), data));
+        let output = block_on(b.finish()).unwrap();
+        let meta = output.meta;
+        sst_data.push((meta.clone(), output.writer_output));
         sst_info.push(SstableInfo {
             id: table_id,
             key_range: Some(KeyRange {

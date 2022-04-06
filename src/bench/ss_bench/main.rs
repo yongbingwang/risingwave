@@ -127,6 +127,8 @@ async fn main() {
         write_conflict_detection_enabled: false,
         block_cache_capacity: 256 << 20,
         meta_cache_capacity: 64 << 20,
+        // TODO: may want to set to true when running some benchmarks
+        stream_upload_s3_enabled: false,
     });
 
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());

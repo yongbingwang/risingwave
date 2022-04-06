@@ -15,6 +15,8 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::stream::BoxStream;
+pub use futures::StreamExt;
 use risingwave_common::error::Result;
 
 pub mod mem;
@@ -49,6 +51,10 @@ impl BlockLocation {
 pub trait ObjectStore: Send + Sync {
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> Result<()>;
+
+    /// If the `block_loc` is None, the whole object will be return.
+    /// Upload the object to `ObjectStore` in a byte stream
+    async fn upload_stream(&self, path: &str, stream: BoxStream<'static, Bytes>) -> Result<()>;
 
     /// If the `block_loc` is None, the whole object will be return.
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same

@@ -15,7 +15,9 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::stream::BoxStream;
 use moka::future::Cache;
+use risingwave_common::error::Result;
 
 use super::{Block, BlockCache, Sstable, SstableMeta, TracedHummockError};
 use crate::hummock::{HummockError, HummockResult};
@@ -71,19 +73,12 @@ impl SstableStore {
     ) -> HummockResult<usize> {
         let timer = self.stats.sst_store_put_remote_duration.start_timer();
 
-        let meta = Bytes::from(sst.meta.encode_to_bytes());
-        let len = data.len();
-
-        let data_path = self.get_sst_data_path(sst.id);
-        self.store
-            .upload(&data_path, data.clone())
+        self.put_sst_data(sst.id, data.clone())
             .await
             .map_err(HummockError::object_io_error)?;
 
-        let meta_path = self.get_sst_meta_path(sst.id);
-        if let Err(e) = self.store.upload(&meta_path, meta).await {
-            self.store
-                .delete(&data_path)
+        if let Err(e) = self.put_meta(sst).await {
+            self.delete_sst_data(sst.id)
                 .await
                 .map_err(HummockError::object_io_error)?;
             return Err(HummockError::object_io_error(e));
@@ -96,14 +91,49 @@ impl SstableStore {
             for (block_idx, meta) in sst.meta.block_metas.iter().enumerate() {
                 let offset = meta.offset as usize;
                 let len = meta.len as usize;
-                let block = Arc::new(Block::decode(data.slice(offset..offset + len))?);
-                self.block_cache
-                    .insert(sst.id, block_idx as u64, block)
+                self.add_block_cache(sst.id, block_idx as u64, data.slice(offset..offset + len))
                     .await
+                    .unwrap();
             }
         }
 
-        Ok(len)
+        Ok(data.len())
+    }
+
+    pub async fn put_meta(&self, sst: &Sstable) -> Result<()> {
+        let meta_path = self.get_sst_meta_path(sst.id);
+        let meta = Bytes::from(sst.meta.encode_to_bytes());
+        self.store.upload(&meta_path, meta).await
+    }
+
+    pub async fn put_sst_data(&self, sst_id: u64, data: Bytes) -> Result<()> {
+        let data_path = self.get_sst_data_path(sst_id);
+        self.store.upload(&data_path, data).await
+    }
+
+    pub async fn put_sst_data_stream(
+        &self,
+        sst_id: u64,
+        stream: BoxStream<'static, Bytes>,
+    ) -> Result<()> {
+        let data_path = self.get_sst_data_path(sst_id);
+        self.store.upload_stream(&data_path, stream).await
+    }
+
+    pub async fn delete_sst_data(&self, sst_id: u64) -> Result<()> {
+        let data_path = self.get_sst_data_path(sst_id);
+        self.store.delete(&data_path).await
+    }
+
+    pub async fn add_block_cache(
+        &self,
+        table_id: u64,
+        block_idx: u64,
+        block_data: Bytes,
+    ) -> Result<()> {
+        let block = Arc::new(Block::decode(block_data)?);
+        self.block_cache.insert(table_id, block_idx, block).await;
+        Ok(())
     }
 
     pub async fn get(

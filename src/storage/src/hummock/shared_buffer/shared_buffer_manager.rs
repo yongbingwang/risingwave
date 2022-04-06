@@ -100,7 +100,7 @@ impl SharedBufferManager {
     }
 
     // TODO: support time-based syncing
-    pub async fn sync(&self, epoch: Option<u64>) -> HummockResult<()> {
+    pub async fn sync(&self, epoch: Option<u64>) -> Result<()> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.uploader_tx
             .send(SharedBufferUploaderItem::Sync(SyncItem {

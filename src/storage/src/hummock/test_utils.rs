@@ -17,6 +17,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::executor::block_on;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 
@@ -27,7 +28,8 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockStorage, SSTableBuilder, SSTableBuilderOptions, Sstable, SstableStoreRef,
+    CachePolicy, HummockStorage, InMemSstableWriter, SSTableBuilder, SSTableBuilderOptions,
+    Sstable, SstableStoreRef,
 };
 use crate::monitor::StateStoreMetrics;
 
@@ -41,6 +43,7 @@ pub fn default_config_for_test() -> StorageConfig {
         write_conflict_detection_enabled: true,
         block_cache_capacity: 64 << 20,
         meta_cache_capacity: 64 << 20,
+        stream_upload_s3_enabled: false,
     }
 }
 
@@ -77,11 +80,13 @@ pub fn gen_test_sstable_data(
     opts: SSTableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta) {
-    let mut b = SSTableBuilder::new(opts);
+    let writer = InMemSstableWriter::new(opts.capacity);
+    let mut b = SSTableBuilder::new(opts, writer, true);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice())
+        block_on(b.add(&key, value.as_slice())).unwrap()
     }
-    b.finish()
+    let output = block_on(b.finish()).unwrap();
+    (output.writer_output, output.meta)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`

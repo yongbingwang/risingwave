@@ -39,7 +39,7 @@ impl SharedBufferFlusher {
     }
 
     pub async fn run(self) {
-        let mut time_interval = tokio::time::interval(Duration::from_millis(50));
+        let mut time_interval = tokio::time::interval(Duration::from_millis(10));
         log::info!("flusher start running!");
         loop {
             if let Some(shared_buffer_mgr) = self.shared_buffer_mgr.upgrade() {
@@ -54,7 +54,7 @@ impl SharedBufferFlusher {
                     }
 
                     timer.observe_duration();
-                    println!("finished sync");
+                    log::info!("finished sync");
                 } else {
                     // wait a moment for executors to fill the shared buffer
                     time_interval.tick().await;

@@ -104,6 +104,8 @@ pub async fn compute_node_serve(
         storage_config.as_ref(),
         registry.clone(),
     ));
+    log::info!("State store shared buffer threshold {} MB", storage_config.shared_buffer_threshold_mb);
+
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,
@@ -115,8 +117,6 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
-
-    log::info!("State store shared buffer threshold {} MB", storage_config.shared_buffer_threshold_mb);
 
     // A hummock compactor is deployed along with compute node for now.
     if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {

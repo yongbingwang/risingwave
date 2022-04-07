@@ -25,6 +25,7 @@ use crate::write_batch::WriteBatch;
 pub trait GetFutureTrait<'a> = Future<Output = Result<Option<Bytes>>> + Send;
 pub trait ScanFutureTrait<'a, R, B> = Future<Output = Result<Vec<(Bytes, Bytes)>>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = Result<()>> + Send;
+pub trait IngestBatchFutureTrait<'a> = Future<Output = Result<u64>> + Send;
 
 #[macro_export]
 macro_rules! define_state_store_associated_type {
@@ -32,7 +33,7 @@ macro_rules! define_state_store_associated_type {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
         type ReverseScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
-        type IngestBatchFuture<'a> = impl EmptyFutureTrait<'a>;
+        type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
         type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
@@ -58,7 +59,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: 'static + Send,
         B: 'static + Send;
 
-    type IngestBatchFuture<'a>: EmptyFutureTrait<'a>;
+    type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
 
     type ReplicateBatchFuture<'a>: EmptyFutureTrait<'a>;
 

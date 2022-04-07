@@ -99,8 +99,11 @@ pub async fn compute_node_serve(
     let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
     let storage_config = Arc::new(config.storage.clone());
+    let state_store_metrics = Arc::new(StateStoreMetrics::new(
+        storage_config.as_ref(),
+        registry.clone(),
+    ));
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,
@@ -112,6 +115,8 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
+
+    log::info!("State store shared buffer threshold {} MB", storage_config.shared_buffer_threshold_mb);
 
     // A hummock compactor is deployed along with compute node for now.
     if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {

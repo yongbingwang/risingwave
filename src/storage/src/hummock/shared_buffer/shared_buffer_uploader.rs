@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
@@ -99,6 +100,8 @@ impl SharedBufferUploader {
             None => return Ok(()),
         };
 
+        let sync_size: u64 = buffers.iter().map(|batch| batch.size).sum();
+
         // Compact buffers into SSTs
         let mem_compactor_ctx = CompactorContext {
             options: self.options.clone(),
@@ -115,6 +118,10 @@ impl SharedBufferUploader {
             self.stats.clone(),
         )
         .await?;
+
+        let shared_buff_prev_size = self.stats.shared_buffer_cur_size.fetch_sub(sync_size, Ordering::SeqCst);
+        println!("shared_buffer_uploader: shared_buff_prev_size {}, sync_size {}", shared_buff_prev_size, sync_size);
+        assert!(shared_buff_prev_size >= sync_size);
 
         // Add all tables at once.
         let version = self

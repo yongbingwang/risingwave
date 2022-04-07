@@ -19,9 +19,11 @@ use std::fmt;
 use std::future::Future;
 use std::ops::RangeBounds;
 use std::sync::Arc;
+use std::sync::atomic;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use tokio::task::yield_now;
 
 mod block_cache;
 pub use block_cache::*;
@@ -72,6 +74,7 @@ use crate::hummock::version_cmp::VersionedComparator;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
+use crate::hummock::shared_buffer::shared_buffer_flusher::SharedBufferFlusher;
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
@@ -136,6 +139,10 @@ impl HummockStorage {
             stats.clone(),
             hummock_meta_client.clone(),
         ));
+
+        let shared_buffer_flusher =
+            SharedBufferFlusher::new(stats.clone(), Arc::downgrade(&shared_buffer_manager));
+        tokio::spawn(shared_buffer_flusher.run());
 
         LocalVersionManager::start_workers(
             local_version_manager.clone(),
@@ -361,6 +368,14 @@ impl StateStore for HummockStorage {
         epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+
+            let mut shared_buff_cur_size = self.stats.shared_buffer_cur_size.load(atomic::Ordering::SeqCst);
+            // yield current task if threshold has been reached
+            while self.stats.shared_buffer_threshold_size <= shared_buff_cur_size {
+                yield_now().await;
+                shared_buff_cur_size = self.stats.shared_buffer_cur_size.load(atomic::Ordering::SeqCst);
+            }
+
             let batch = kv_pairs
                 .into_iter()
                 .map(|(key, value)| {
@@ -370,12 +385,15 @@ impl StateStore for HummockStorage {
                     )
                 })
                 .collect_vec();
-            self.shared_buffer_manager.write_batch(batch, epoch)?;
+
+            let batch_size = self.shared_buffer_manager.write_batch(batch, epoch)?;
+            self.stats.shared_buffer_cur_size.fetch_add(batch_size as _, atomic::Ordering::SeqCst);
+            log::debug!("ingested batch size: {}", batch_size);
 
             if !self.options.async_checkpoint_enabled {
                 self.shared_buffer_manager.sync(Some(epoch)).await?;
             }
-            Ok(())
+            Ok(batch_size)
         }
     }
 

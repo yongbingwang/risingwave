@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{Arc, Weak};
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use risingwave_common::error::RwError;

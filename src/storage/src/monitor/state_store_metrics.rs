@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::atomic;
+
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,

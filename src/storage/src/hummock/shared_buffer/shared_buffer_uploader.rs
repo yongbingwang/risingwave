@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
@@ -119,8 +119,15 @@ impl SharedBufferUploader {
         )
         .await?;
 
-        let shared_buff_prev_size = self.stats.shared_buffer_cur_size.fetch_sub(sync_size, Ordering::SeqCst);
-        log::debug!("shared_buffer_uploader: shared_buff_prev_size {}, sync_size {}", shared_buff_prev_size, sync_size);
+        let shared_buff_prev_size = self
+            .stats
+            .shared_buffer_cur_size
+            .fetch_sub(sync_size, Ordering::SeqCst);
+        log::debug!(
+            "shared_buffer_uploader: shared_buff_prev_size {}, sync_size {}",
+            shared_buff_prev_size,
+            sync_size
+        );
         assert!(shared_buff_prev_size >= sync_size);
 
         // Add all tables at once.

@@ -141,7 +141,9 @@ where
                 return Ok(0);
             }
 
-            self.stats.write_batch_tuple_counts.inc_by(kv_pairs.len() as _);
+            self.stats
+                .write_batch_tuple_counts
+                .inc_by(kv_pairs.len() as _);
             let timer = self.stats.write_batch_duration.start_timer();
             let batch_size = self.inner.ingest_batch(kv_pairs, epoch).await?;
             timer.observe_duration();

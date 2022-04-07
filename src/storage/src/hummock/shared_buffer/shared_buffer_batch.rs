@@ -40,8 +40,8 @@ impl SharedBufferBatch {
             .map(|(k, v)| {
                 let vsize = {
                     match v {
-                        HummockValue::Put(_, val) => { val.len() }
-                        HummockValue::Delete(_) => { 0 }
+                        HummockValue::Put(_, val) => val.len(),
+                        HummockValue::Delete(_) => 0,
                     }
                 };
                 (k.len() + vsize) as u64

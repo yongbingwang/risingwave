@@ -244,46 +244,15 @@ mod tests {
 
     use std::sync::Arc;
 
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{Array, DataChunk, I32Array};
-    use risingwave_common::array_nonnull;
+    use risingwave_common::array::Array;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
+    use crate::executor::test_utils::MockCreateSource;
 
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
-        struct FakeExchangeSource {
-            chunk: Option<DataChunk>,
-        }
-
-        #[async_trait::async_trait]
-        impl ExchangeSource for FakeExchangeSource {
-            async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-                let chunk = self.chunk.take();
-                Ok(chunk)
-            }
-        }
-
-        struct FakeCreateSource {}
-
-        #[async_trait::async_trait]
-        impl CreateSource for FakeCreateSource {
-            async fn create_source(
-                _: BatchEnvironment,
-                _: &ProstExchangeSource,
-                _: TaskId,
-            ) -> Result<Box<dyn ExchangeSource>> {
-                let chunk = DataChunk::builder()
-                    .columns(vec![Column::new(Arc::new(
-                        array_nonnull! { I32Array, [1, 2, 3] }.into(),
-                    ))])
-                    .build();
-                Ok(Box::new(FakeExchangeSource { chunk: Some(chunk) }))
-            }
-        }
-
         let mut proto_sources: Vec<ProstExchangeSource> = vec![];
         let num_sources = 2;
         for _ in 0..num_sources {
@@ -294,7 +263,7 @@ mod tests {
             order_type: OrderType::Ascending,
         }]);
 
-        let mut executor = MergeSortExchangeExecutorImpl::<FakeCreateSource> {
+        let mut executor = MergeSortExchangeExecutorImpl::<MockCreateSource> {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             env: BatchEnvironment::for_test(),
             source_inputs: vec![None; proto_sources.len()],

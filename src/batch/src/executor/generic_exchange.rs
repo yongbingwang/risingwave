@@ -161,53 +161,20 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{DataChunk, I32Array};
-    use risingwave_common::array_nonnull;
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::executor::test_utils::MockCreateSource;
 
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
-        struct FakeExchangeSource {
-            chunk: Option<DataChunk>,
-        }
-
-        #[async_trait::async_trait]
-        impl ExchangeSource for FakeExchangeSource {
-            async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-                let chunk = self.chunk.take();
-                Ok(chunk)
-            }
-        }
-
-        struct FakeCreateSource {}
-
-        #[async_trait::async_trait]
-        impl CreateSource for FakeCreateSource {
-            async fn create_source(
-                _: BatchEnvironment,
-                _: &ProstExchangeSource,
-                _: TaskId,
-            ) -> Result<Box<dyn ExchangeSource>> {
-                let chunk = DataChunk::builder()
-                    .columns(vec![Column::new(Arc::new(
-                        array_nonnull! { I32Array, [3, 4, 4] }.into(),
-                    ))])
-                    .build();
-                Ok(Box::new(FakeExchangeSource { chunk: Some(chunk) }))
-            }
-        }
-
         let mut sources: Vec<ProstExchangeSource> = vec![];
         for _ in 0..3 {
             sources.push(ProstExchangeSource::default());
         }
 
-        let mut executor = GenericExchangeExecutor::<FakeCreateSource> {
+        let mut executor = GenericExchangeExecutor::<MockCreateSource> {
             sources,
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_idx: 0,

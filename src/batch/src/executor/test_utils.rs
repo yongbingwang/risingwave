@@ -16,12 +16,47 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{DataChunk, I32Array};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_pb::plan::ExchangeSource as ProstExchangeSource;
+use risingwave_rpc_client::ExchangeSource;
 
 use super::BoxedExecutor;
+use crate::executor::generic_exchange::CreateSource;
 use crate::executor::Executor;
+use crate::task::{BatchEnvironment, TaskId};
+
+pub(super) struct MockExchangeSource {
+    chunk: Option<DataChunk>,
+}
+
+#[async_trait::async_trait]
+impl ExchangeSource for MockExchangeSource {
+    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+        let chunk = self.chunk.take();
+        Ok(chunk)
+    }
+}
+
+pub(super) struct MockCreateSource {}
+
+#[async_trait::async_trait]
+impl CreateSource for MockCreateSource {
+    async fn create_source(
+        _: BatchEnvironment,
+        _: &ProstExchangeSource,
+        _: TaskId,
+    ) -> Result<Box<dyn ExchangeSource>> {
+        let chunk = DataChunk::builder()
+            .columns(vec![Column::new(Arc::new(
+                array_nonnull! { I32Array, [1, 2, 3] }.into(),
+            ))])
+            .build();
+        Ok(Box::new(MockExchangeSource { chunk: Some(chunk) }))
+    }
+}
 
 /// Mock the input of executor.
 /// You can bind one or more `MockExecutor` as the children of the executor to test,

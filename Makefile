@@ -93,3 +93,6 @@ docker_frontend:
 
 docker_backend:
 	docker build -f docker/backend/Dockerfile -t ${DOCKER_GROUP_NAME}/${DOCKER_COMPONENT_BACKEND_NAME}:${DOCKER_IMAGE_TAG} .
+
+docker-compose:
+	docker-compose -f docker/docker-compose.yml --project-directory . up

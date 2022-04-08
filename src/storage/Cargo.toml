@@ -77,3 +77,7 @@ name = "bench_block_iter"
 harness = false
 # Enable debug if you want to generate flamegraph.
 # debug = true
+
+[[bin]]
+name = "s3_stream_upload"
+path = "src/bin/s3_stream_upload.rs"

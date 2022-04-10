@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::error::{Result, ToRwResult};
-use tikv_client::{BoundRange, KvPair, TransactionClient};
+use tikv_client::{BoundRange, KvPair, TransactionClient, RawClient, Key};
 use tokio::sync::OnceCell;
 
 use super::StateStore;
@@ -31,6 +31,7 @@ const SCAN_LIMIT: usize = 100;
 #[derive(Clone)]
 pub struct TikvStateStore {
     client: Arc<OnceCell<tikv_client::transaction::Client>>,
+    raw_client: Arc<OnceCell<tikv_client::raw::Client>>,
     pd: Vec<String>,
 }
 
@@ -39,6 +40,7 @@ impl TikvStateStore {
         println!("\n use tikv stateStore \n");
         Self {
             client: Arc::new(OnceCell::new()),
+            raw_client: Arc::new(OnceCell::new()),
             pd: pd_endpoints,
         }
     }
@@ -46,6 +48,14 @@ impl TikvStateStore {
         self.client
             .get_or_init(|| async {
                 let client = TransactionClient::new(self.pd.clone(), None).await.unwrap();
+                client
+            })
+            .await
+    }
+    pub async fn raw_client(&self) -> &tikv_client::raw::Client {
+        self.raw_client
+            .get_or_init(|| async {
+                let client = RawClient::new(self.pd.clone(), None).await.unwrap();
                 client
             })
             .await
@@ -133,25 +143,43 @@ impl StateStore for TikvStateStore {
         _epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            let mut txn = self.client().await.begin_optimistic().await.unwrap();
+            // let mut txn = self.client().await.begin_optimistic().await.unwrap();
+            // for (key, value) in kv_pairs {
+            //     let value = value.user_value;
+            //     match value {
+            //         Some(value) => {
+            //             txn.put(tikv_client::Key::from(key.to_vec()), value.to_vec())
+            //                 .await
+            //                 .map_err(anyhow::Error::new)
+            //                 .to_rw_result()?;
+            //         }
+            //         None => {
+            //             txn.delete(tikv_client::Key::from(key.to_vec()))
+            //                 .await
+            //                 .map_err(anyhow::Error::new)
+            //                 .to_rw_result()?;
+            //         }
+            //     }
+            // }
+            // txn.commit().await.unwrap();
+            // Ok(())
+            let mut batch_put: Vec<KvPair> = Vec::new();
+            let mut batch_delete: Vec<Key> = Vec::new();
             for (key, value) in kv_pairs {
                 let value = value.user_value;
                 match value {
                     Some(value) => {
-                        txn.put(tikv_client::Key::from(key.to_vec()), value.to_vec())
-                            .await
-                            .map_err(anyhow::Error::new)
-                            .to_rw_result()?;
+                        batch_put.push(KvPair::new(tikv_client::Key::from(key.to_vec()), value.to_vec()));
                     }
                     None => {
-                        txn.delete(tikv_client::Key::from(key.to_vec()))
-                            .await
-                            .map_err(anyhow::Error::new)
-                            .to_rw_result()?;
+                        batch_delete.push(tikv_client::Key::from(key.to_vec()));
                     }
                 }
             }
-            txn.commit().await.unwrap();
+            let req = self.raw_client().await.batch_put(batch_put);
+            req.await.unwrap();
+            let req = self.raw_client().await.batch_delete(batch_delete);
+            req.await.unwrap();
             Ok(())
         }
     }
@@ -187,11 +215,11 @@ impl StateStore for TikvStateStore {
     }
 
     fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
-        async move { unimplemented!() }
+        async move { Ok(()) }
     }
 
     fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
-        async move { unimplemented!() }
+        async move { Ok(()) }
     }
 }
 

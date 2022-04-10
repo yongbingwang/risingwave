@@ -133,11 +133,14 @@ impl StateStore for RocksDBStateStore {
     }
 
     fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
-        async move { unimplemented!() }
+        async move { Ok(()) }
     }
 
     fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
-        async move { self.storage().await.sync().await }
+        async move {
+            //self.storage().await.sync().await
+            Ok(())
+        }
     }
 }
 
